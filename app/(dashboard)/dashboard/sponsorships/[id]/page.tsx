@@ -81,6 +81,7 @@ type SponsorDetail = {
     donation?: {
       amount?: number;
       period?: string;
+      expectedFundsDate?: string | Date | null;
       remindByEmail?: boolean;
     };
     startDate?: string;
@@ -97,6 +98,8 @@ type SponsorDetail = {
     pendingChildren?: number;
     totalPledged?: number;
     totalPaid?: number;
+    lastPaymentDate?: string | null;
+    nextPaymentDate?: string | null;
   };
 };
 
@@ -182,6 +185,8 @@ export default function SponsorDetailPage() {
   >("overview");
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUpdatingReminderPreference, setIsUpdatingReminderPreference] = useState(false);
+  const [reminderPreferenceError, setReminderPreferenceError] = useState("");
   const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
@@ -220,7 +225,8 @@ export default function SponsorDetailPage() {
     address: "",
     amount: "",
     period: "Monthly",
-    remindByEmail: false,
+    expectedFundsDate: "",
+    remindByEmail: true,
     paymentMethod: "zelle",
     childId: "",
     startDate: new Date().toISOString().slice(0, 10),
@@ -702,7 +708,10 @@ export default function SponsorDetailPage() {
       address: location.address || "",
       amount: String(sponsor.donation?.amount || ""),
       period: sponsor.donation?.period || "Monthly",
-      remindByEmail: Boolean(sponsor.donation?.remindByEmail),
+      expectedFundsDate: sponsor.donation?.expectedFundsDate
+        ? new Date(sponsor.donation.expectedFundsDate).toISOString().slice(0, 10)
+        : "",
+      remindByEmail: sponsor.donation?.remindByEmail !== false,
       paymentMethod: sponsor.paymentMethod || "zelle",
       childId:
         typeof sponsor.child === "string"
@@ -714,6 +723,42 @@ export default function SponsorDetailPage() {
     });
     setFormError("");
     setIsEditOpen(true);
+  };
+
+  const handleReminderPreferenceChange = async (enabled: boolean) => {
+    if (!sponsorId) return;
+
+    setIsUpdatingReminderPreference(true);
+    setReminderPreferenceError("");
+    try {
+      const response = await apiRequest(
+        "PATCH",
+        `/sponsors/profile/${sponsorId}`,
+        { donation: { remindByEmail: enabled } },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to update reminder preference.");
+      }
+
+      setProfile((current) =>
+        current
+          ? { ...current, sponsor: { ...current.sponsor, ...result.sponsor } }
+          : current,
+      );
+      setFormState((current) => ({ ...current, remindByEmail: enabled }));
+      await queryClient.invalidateQueries({
+        queryKey: ["sponsors", "profiles", "all"],
+      });
+    } catch (error) {
+      setReminderPreferenceError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update reminder preference.",
+      );
+    } finally {
+      setIsUpdatingReminderPreference(false);
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -766,6 +811,7 @@ export default function SponsorDetailPage() {
           donation: {
             amount,
             period: formState.period,
+            expectedFundsDate: formState.expectedFundsDate || undefined,
             remindByEmail: formState.remindByEmail,
           },
           paymentMethod: formState.paymentMethod,
@@ -775,6 +821,10 @@ export default function SponsorDetailPage() {
       );
 
       const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to save the sponsor profile.");
+      }
+
       setProfile((current) =>
         current
           ? {
@@ -1131,6 +1181,12 @@ export default function SponsorDetailPage() {
   const totalPledged = Number(sponsor?.donation?.amount || 0);
   const totalPaid = Number(profile?.summary?.totalPaid || 0);
   const plegedFrequency = sponsor?.donation?.period || "Monthly";
+  const lastPaymentDate = profile?.summary?.lastPaymentDate
+    ? new Date(profile.summary.lastPaymentDate)
+    : null;
+  const nextPaymentDate = profile?.summary?.nextPaymentDate
+    ? new Date(profile.summary.nextPaymentDate)
+    : null;
 
   return (
     <div className="min-w-0 p-4 sm:p-6 lg:p-8">
@@ -1221,7 +1277,7 @@ export default function SponsorDetailPage() {
               <p className="text-xs uppercase tracking-wide text-foreground/60">
                 Email
               </p>
-              <p className="mt-1 break-all text-base font-semibold text-foreground">
+              <p className="mt-1 break-all  text-sm font-semibold text-foreground">
                 {email}
               </p>
             </div>
@@ -1241,6 +1297,7 @@ export default function SponsorDetailPage() {
                 {sponsoredChildren.length}
               </p>
             </div>
+
             <div className="rounded-lg bg-muted p-3">
               <p className="text-xs uppercase tracking-wide text-foreground/60">
                 Payment method
@@ -1304,6 +1361,31 @@ export default function SponsorDetailPage() {
                   {sponsorProfile.bio || "Not provided"}
                 </li>
               </ul>
+              <div className="mt-4 flex items-center justify-between gap-4 border-t border-border pt-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Payment reminders by email
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {sponsor.donation?.remindByEmail === false
+                      ? "Email reminders are off"
+                      : "Email reminders are on"}
+                  </p>
+                </div>
+                <Switch
+                  checked={sponsor.donation?.remindByEmail !== false}
+                  onCheckedChange={(enabled) =>
+                    void handleReminderPreferenceChange(enabled)
+                  }
+                  disabled={isUpdatingReminderPreference}
+                  aria-label="Send payment reminders by email"
+                />
+              </div>
+              {reminderPreferenceError ? (
+                <p role="alert" className="mt-2 text-sm text-destructive">
+                  {reminderPreferenceError}
+                </p>
+              ) : null}
             </Card>
 
             <Card className="p-4">
@@ -1328,6 +1410,22 @@ export default function SponsorDetailPage() {
                   </p>
                   <p className="mt-2 text-xl font-semibold text-foreground">
                     ${totalPaid}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted p-3">
+                  <p className="text-xs uppercase tracking-wide text-foreground/60">
+                    Last payment
+                  </p>
+                  <p className="mt-2 text-xl font-semibold text-foreground">
+                    {lastPaymentDate ? lastPaymentDate.toLocaleDateString() : "No payment yet"}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted p-3">
+                  <p className="text-xs uppercase tracking-wide text-foreground/60">
+                    Next expected funds
+                  </p>
+                  <p className="mt-2 text-xl font-semibold text-foreground">
+                    {nextPaymentDate ? nextPaymentDate.toLocaleDateString() : "Not scheduled"}
                   </p>
                 </div>
               </div>
@@ -1729,6 +1827,23 @@ export default function SponsorDetailPage() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="editSponsorExpectedFundsDate">
+                Expected funds date
+              </Label>
+              <Input
+                id="editSponsorExpectedFundsDate"
+                type="date"
+                value={formState.expectedFundsDate}
+                onChange={(event) =>
+                  setFormState((current) => ({
+                    ...current,
+                    expectedFundsDate: event.target.value,
+                  }))
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="editSponsorStartDate">Start date</Label>
               <Input
                 id="editSponsorStartDate"
@@ -1764,20 +1879,22 @@ export default function SponsorDetailPage() {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2 md:col-span-2">
-              <input
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3 md:col-span-2">
+              <Label htmlFor="editRemindByEmail">
+                Send payment reminders by email
+              </Label>
+              <Switch
                 id="editRemindByEmail"
-                type="checkbox"
                 checked={formState.remindByEmail}
-                onChange={(event) =>
+                onCheckedChange={(enabled) =>
                   setFormState((current) => ({
                     ...current,
-                    remindByEmail: event.target.checked,
+                    remindByEmail: enabled,
                   }))
                 }
-                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                disabled={isSaving}
+                aria-label="Send payment reminders by email"
               />
-              <Label htmlFor="editRemindByEmail">Send reminders by email</Label>
             </div>
 
             <div className="space-y-2 md:col-span-2">

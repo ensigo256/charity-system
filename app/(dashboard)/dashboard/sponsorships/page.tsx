@@ -40,10 +40,13 @@ import {
   Loader,
   Plus,
   Archive,
+  Upload,
+  X,
 } from "lucide-react";
 import type { PaymentRecord, SponsorshipRecord } from "@/lib/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/query-client";
+import { uploadImageToCloudinary } from "@/lib/cloudinary-upload";
 import { ListPagination } from "@/components/dashboard/list-pagination";
 
 const PAGE_SIZE = 25;
@@ -75,11 +78,13 @@ type SponsorProfile = {
   donation?: {
     amount?: number;
     period?: string;
+    expectedFundsDate?: string | Date | null;
     remindByEmail?: boolean;
   };
   paymentMethod?: string;
   profileStatus?: "Complete" | "Incomplete" | string;
   isArchived?: boolean;
+  image?: { url?: string; public_id?: string };
 };
 
 type PaymentForm = {
@@ -102,10 +107,12 @@ type SponsorForm = {
   bio: string;
   amount: string;
   period: string;
+  expectedFundsDate: string;
   remindByEmail: boolean;
   paymentMethod: string;
   childId: string;
   startDate: string;
+  image: { url: string; public_id: string };
 };
 
 const initialPayment: PaymentForm = {
@@ -126,12 +133,14 @@ const initialSponsorForm: SponsorForm = {
   region: "",
   zipCode: "",
   bio: "",
-  amount: "",
+  amount: "50",
   period: "Monthly",
+  expectedFundsDate: "",
   remindByEmail: true,
-  paymentMethod: "zelle",
+  paymentMethod: "ach",
   childId: "",
   startDate: new Date().toISOString().slice(0, 10),
+  image: { url: "", public_id: "" },
 };
 
 const emptySponsorshipRecords: SponsorshipRecord[] = [];
@@ -201,6 +210,7 @@ export default function SponsorshipsDashboard() {
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sponsorSubmitting, setSponsorSubmitting] = useState(false);
+  const [isUploadingSponsorImage, setIsUploadingSponsorImage] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<SponsorProfile | null>(
     null,
   );
@@ -208,12 +218,28 @@ export default function SponsorshipsDashboard() {
   const [archiveError, setArchiveError] = useState("");
   const [sponsorFormError, setSponsorFormError] = useState("");
   const [paymentForm, setPaymentForm] = useState(initialPayment);
+  const [activePledgeId, setActivePledgeId] = useState("");
+  const [pledgeReceipt, setPledgeReceipt] = useState({
+    amount: "",
+    date: new Date().toISOString().slice(0, 10),
+    bankReference: "",
+    notes: "",
+  });
+  const [pledgeError, setPledgeError] = useState("");
+  const [pledgeSubmitting, setPledgeSubmitting] = useState(false);
   const [sponsorForm, setSponsorForm] =
     useState<SponsorForm>(initialSponsorForm);
 
   const sponsorProfiles = useMemo(
     () => (Array.isArray(sponsorships) ? sponsorships : []),
     [sponsorships],
+  );
+  const pendingPublicPledges = useMemo(
+    () =>
+      records.filter(
+        (record) => record.publicPledgeReference && record.status === "Pending",
+      ),
+    [records],
   );
 
   useEffect(() => {
@@ -274,6 +300,13 @@ export default function SponsorshipsDashboard() {
       region: profile.region || location.region || current.region,
       zipCode: profile.zipCode || location.zipCode || current.zipCode,
       bio: profile.bio || current.bio,
+      amount: String(selectedSponsorProfile?.donation?.amount || current.amount || ""),
+      period: selectedSponsorProfile?.donation?.period || current.period,
+      expectedFundsDate:
+        String(selectedSponsorProfile?.donation?.expectedFundsDate || current.expectedFundsDate || "").slice(0, 10),
+      remindByEmail: Boolean(selectedSponsorProfile?.donation?.remindByEmail ?? current.remindByEmail),
+      paymentMethod: selectedSponsorProfile?.paymentMethod || current.paymentMethod,
+      image: selectedSponsorProfile?.image || current.image,
     }));
     setIsEditProfileOpen(true);
   };
@@ -298,6 +331,13 @@ export default function SponsorshipsDashboard() {
             zipCode: sponsorForm.zipCode.trim(),
             bio: sponsorForm.bio.trim(),
           },
+          donation: {
+            amount: Number(sponsorForm.amount || 0),
+            period: sponsorForm.period,
+            expectedFundsDate: sponsorForm.expectedFundsDate || undefined,
+            remindByEmail: sponsorForm.remindByEmail,
+          },
+          image: sponsorForm.image.url ? sponsorForm.image : undefined,
         },
       );
 
@@ -331,8 +371,12 @@ export default function SponsorshipsDashboard() {
     }
 
     const amount = Number(sponsorForm.amount);
-    if (isNaN(amount) || amount <= 0) {
-      setSponsorFormError("Please enter a valid donation amount.");
+    if (!/^\S+@\S+\.\S+$/.test(sponsorForm.email.trim())) {
+      setSponsorFormError("Please enter a valid email address.");
+      return;
+    }
+    if (isNaN(amount) || amount < 5 || amount > 100000) {
+      setSponsorFormError("Enter an amount from $5 to $100,000.");
       return;
     }
 
@@ -357,21 +401,26 @@ export default function SponsorshipsDashboard() {
           zipCode: sponsorForm.zipCode.trim(),
           bio: sponsorForm.bio.trim(),
         },
+        image: sponsorForm.image.url ? sponsorForm.image : undefined,
         childId: sponsorForm.childId || undefined,
         child: sponsorForm.childId || undefined,
         location: {
           address: sponsorForm.address.trim(),
+          country: sponsorForm.country.trim(),
           city: sponsorForm.city.trim(),
           state: sponsorForm.state.trim(),
+          region: sponsorForm.region.trim(),
           zipCode: sponsorForm.zipCode.trim(),
         },
         donation: {
           amount,
           period: sponsorForm.period,
+          expectedFundsDate: sponsorForm.expectedFundsDate || undefined,
           remindByEmail: sponsorForm.remindByEmail,
         },
         paymentMethod: sponsorForm.paymentMethod,
         startDate: sponsorForm.startDate,
+        expectedFundsDate: sponsorForm.expectedFundsDate || undefined,
         status: "Active",
         source: "dashboard",
       };
@@ -398,6 +447,42 @@ export default function SponsorshipsDashboard() {
     } finally {
       setSponsorSubmitting(false);
     }
+  };
+
+  const handleSponsorImageUpload = async (file?: File) => {
+    if (!file) return;
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      setSponsorFormError("Choose a JPEG, PNG, or WebP image up to 5 MB.");
+      return;
+    }
+
+    setIsUploadingSponsorImage(true);
+    setSponsorFormError("");
+    try {
+      const uploaded = await uploadImageToCloudinary(file);
+      setSponsorForm((current) => ({
+        ...current,
+        image: {
+          url: String(uploaded.secure_url || ""),
+          public_id: String(uploaded.public_id || ""),
+        },
+      }));
+    } catch (error) {
+      console.error("Sponsor image upload failed:", error);
+      setSponsorFormError("Unable to upload that image. Please try again.");
+    } finally {
+      setIsUploadingSponsorImage(false);
+    }
+  };
+
+  const removeSponsorImage = () => {
+    setSponsorForm((current) => ({
+      ...current,
+      image: { url: "", public_id: "" },
+    }));
   };
 
   const handleArchiveSponsor = async () => {
@@ -457,7 +542,11 @@ export default function SponsorshipsDashboard() {
   };
 
   const handleAddPayment = async () => {
-    if (!selectedRecord || !paymentForm.amount.trim()) {
+    if (
+      !selectedRecord ||
+      !paymentForm.amount.trim() ||
+      !paymentForm.txnId.trim()
+    ) {
       return;
     }
 
@@ -473,8 +562,8 @@ export default function SponsorshipsDashboard() {
         amount: amountValue,
         method: paymentForm.method,
         status: "Completed" as PaymentStatus,
-        transactionId: `REC-${Date.now()}`,
-        note: paymentForm.note.trim(),
+        transactionId: paymentForm.txnId.trim(),
+        notes: paymentForm.note.trim(),
       };
       // const payLoad: any = {
       //   id: selectedRecord._id,
@@ -502,7 +591,7 @@ export default function SponsorshipsDashboard() {
         method: payLoad.method,
         status: payLoad.status,
         transactionId: payLoad.transactionId,
-        note: payLoad.note,
+        note: payLoad.notes,
       };
 
       const updatedRecord: SponsorshipRecord = {
@@ -532,6 +621,73 @@ export default function SponsorshipsDashboard() {
       console.error("Error adding payment:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleConfirmPublicPledge = async () => {
+    if (!activePledgeId || !pledgeReceipt.bankReference.trim()) {
+      setPledgeError("Enter the bank transaction reference before confirming.");
+      return;
+    }
+
+    const amount = Number(pledgeReceipt.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPledgeError("Enter a valid received amount.");
+      return;
+    }
+
+    setPledgeSubmitting(true);
+    setPledgeError("");
+    try {
+      await apiRequest(
+        "POST",
+        `/sponsors/public/pledges/${activePledgeId}/confirm-ach`,
+        {
+          amount,
+          date: pledgeReceipt.date,
+          bankReference: pledgeReceipt.bankReference.trim(),
+          notes: pledgeReceipt.notes.trim(),
+        },
+      );
+      setActivePledgeId("");
+      setPledgeReceipt({
+        amount: "",
+        date: new Date().toISOString().slice(0, 10),
+        bankReference: "",
+        notes: "",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "sponsorship", "records"] }),
+        queryClient.invalidateQueries({ queryKey: ["children", "profiles"] }),
+      ]);
+    } catch (error) {
+      setPledgeError(
+        error instanceof Error ? error.message : "Unable to confirm transfer.",
+      );
+    } finally {
+      setPledgeSubmitting(false);
+    }
+  };
+
+  const handleCancelPublicPledge = async (pledgeId: string) => {
+    setPledgeSubmitting(true);
+    setPledgeError("");
+    try {
+      await apiRequest("POST", `/sponsors/public/pledges/${pledgeId}/cancel`, {
+        notes: "Cancelled by staff before transfer confirmation.",
+      });
+      setActivePledgeId("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "sponsorship", "records"] }),
+      ]);
+    } catch (error) {
+      setPledgeError(
+        error instanceof Error ? error.message : "Unable to cancel pledge.",
+      );
+    } finally {
+      setPledgeSubmitting(false);
     }
   };
 
@@ -685,6 +841,138 @@ export default function SponsorshipsDashboard() {
           </>
         )}
       </div>
+
+      <Card className="mb-8 border-border bg-card p-4 sm:p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              Pending public pledges
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Record a transfer only after it appears in the organization&apos;s bank account.
+            </p>
+          </div>
+          <Badge variant="secondary">{pendingPublicPledges.length} pending</Badge>
+        </div>
+
+        {pledgeError ? (
+          <p role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {pledgeError}
+          </p>
+        ) : null}
+
+        {pendingPublicPledges.length === 0 ? (
+          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+            No pending public pledges.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {pendingPublicPledges.map((pledge) => {
+              const donor = pledge.donor || {};
+              const child = pledge.child || {};
+              const isReviewing = activePledgeId === pledge._id;
+
+              return (
+                <div key={pledge._id} className="rounded-lg border border-border bg-background p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-foreground">
+                        {donor.profile?.fullName || donor.sponsor?.name || "Sponsor"}
+                        {child.firstName ? ` / ${child.firstName} ${child.secondName || ""}` : " / Child"}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {donor.profile?.email || "No email"} · ${pledge.amount} {pledge.currency || "USD"} / {pledge.frequency || "Monthly"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Pledge reference: {pledge.publicPledgeReference}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isReviewing ? "secondary" : "default"}
+                        onClick={() => {
+                          setActivePledgeId(isReviewing ? "" : pledge._id);
+                          setPledgeReceipt({
+                            amount: String(pledge.amount || ""),
+                            date: new Date().toISOString().slice(0, 10),
+                            bankReference: "",
+                            notes: "",
+                          });
+                          setPledgeError("");
+                        }}
+                      >
+                        {isReviewing ? "Close review" : "Record received transfer"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={pledgeSubmitting}
+                        onClick={() => void handleCancelPublicPledge(pledge._id)}
+                      >
+                        Cancel pledge
+                      </Button>
+                    </div>
+                  </div>
+
+                  {isReviewing ? (
+                    <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor={`receivedAmount-${pledge._id}`}>Received amount (USD)</Label>
+                        <Input
+                          id={`receivedAmount-${pledge._id}`}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={pledgeReceipt.amount}
+                          onChange={(event) => setPledgeReceipt({ ...pledgeReceipt, amount: event.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`receivedDate-${pledge._id}`}>Received date</Label>
+                        <Input
+                          id={`receivedDate-${pledge._id}`}
+                          type="date"
+                          value={pledgeReceipt.date}
+                          onChange={(event) => setPledgeReceipt({ ...pledgeReceipt, date: event.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor={`bankReference-${pledge._id}`}>Bank transaction reference</Label>
+                        <Input
+                          id={`bankReference-${pledge._id}`}
+                          value={pledgeReceipt.bankReference}
+                          onChange={(event) => setPledgeReceipt({ ...pledgeReceipt, bankReference: event.target.value })}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor={`receiptNotes-${pledge._id}`}>Notes (optional)</Label>
+                        <Input
+                          id={`receiptNotes-${pledge._id}`}
+                          value={pledgeReceipt.notes}
+                          onChange={(event) => setPledgeReceipt({ ...pledgeReceipt, notes: event.target.value })}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Button
+                          type="button"
+                          disabled={pledgeSubmitting}
+                          onClick={() => void handleConfirmPublicPledge()}
+                        >
+                          {pledgeSubmitting ? "Recording..." : "Confirm bank receipt and activate"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
 
       {!isLoading && (
         <Card className="mb-8 border-border bg-card p-4 sm:p-6">
@@ -1013,6 +1301,46 @@ export default function SponsorshipsDashboard() {
                 </p>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="sponsorImage">Profile photo (optional)</Label>
+                <div className="flex items-center gap-4">
+                  {sponsorForm.image.url ? (
+                    <div className="relative h-16 w-16 overflow-hidden rounded-full border border-border">
+                      <img
+                        src={sponsorForm.image.url}
+                        alt="Sponsor profile preview"
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={removeSponsorImage}
+                        aria-label="Remove sponsor photo"
+                        className="absolute right-0 top-0 rounded-full bg-background/90 p-1 text-foreground"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ) : null}
+                  <input
+                    id="sponsorImage"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={isUploadingSponsorImage}
+                    onChange={(event) => {
+                      void handleSponsorImageUpload(event.target.files?.[0]);
+                      event.currentTarget.value = "";
+                    }}
+                    className="block w-full text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-2"
+                  />
+                  {isUploadingSponsorImage ? (
+                    <Loader className="size-4 animate-spin" aria-label="Uploading" />
+                  ) : (
+                    <Upload size={16} aria-hidden="true" />
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">JPEG, PNG, or WebP; maximum 5 MB.</p>
+              </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label  htmlFor="sponsorName">Full name</Label>
@@ -1053,6 +1381,7 @@ export default function SponsorshipsDashboard() {
                   <Input 
                   className = {`bg-background`}
                     id="sponsorPhone"
+                    type="tel"
                     value={sponsorForm.phone}
                     onChange={(event) =>
                       setSponsorForm({
@@ -1266,6 +1595,22 @@ export default function SponsorshipsDashboard() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label className="text-muted-foreground" htmlFor="expectedFundsDate">Expected funds date</Label>
+                <Input
+                  className="bg-background"
+                  id="expectedFundsDate"
+                  type="date"
+                  value={sponsorForm.expectedFundsDate}
+                  onChange={(event) =>
+                    setSponsorForm({
+                      ...sponsorForm,
+                      expectedFundsDate: event.target.value,
+                    })
+                  }
+                />
+              </div>
+
               <div className="flex items-center gap-2">
                 <input 
                 
@@ -1409,6 +1754,21 @@ export default function SponsorshipsDashboard() {
                 />
               </div>
             ))}
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="editExpectedFundsDate">Expected funds date</Label>
+              <Input
+                id="editExpectedFundsDate"
+                type="date"
+                className="bg-background"
+                value={sponsorForm.expectedFundsDate}
+                onChange={(event) =>
+                  setSponsorForm({
+                    ...sponsorForm,
+                    expectedFundsDate: event.target.value,
+                  })
+                }
+              />
+            </div>
             <div className="space-y-2 md:col-span-2">
               <Label  htmlFor="editSponsorBio">Bio</Label>
               <textarea
@@ -1631,6 +1991,7 @@ export default function SponsorshipsDashboard() {
                         <Select
                           value={selectedRecord.status}
                           onValueChange={handleUpdateStatus}
+                          disabled={Boolean(selectedRecord.publicPledgeReference)}
                         >
                           <SelectTrigger id="recordStatus" className="w-full">
                             <SelectValue placeholder="Select status" />
@@ -1642,6 +2003,11 @@ export default function SponsorshipsDashboard() {
                             <SelectItem value="Completed">Completed</SelectItem>
                           </SelectContent>
                         </Select>
+                        {selectedRecord.publicPledgeReference ? (
+                          <p className="text-xs text-muted-foreground">
+                            Public pledges must be confirmed from the Pending public pledges section after the bank transfer is received.
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </div>

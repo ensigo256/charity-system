@@ -6,9 +6,6 @@ import { Eye, Mail, MailOpen, Trash2 } from "lucide-react";
 import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/hooks/use-toast";
-import { ListPagination } from "@/components/dashboard/list-pagination";
-
-const PAGE_SIZE = 25;
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -44,12 +41,11 @@ export default function MessagesPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canManage = can("messages.manage");
-  const [page, setPage] = useState(1);
 
   const { data: messages = [], isLoading, isError } = useQuery<Message[]>({
-    queryKey: ["messages", "all", page],
+    queryKey: ["messages", "all"],
     queryFn: async () => {
-      const response = await apiRequest("GET", `/messages/all?page=${page}&limit=${PAGE_SIZE}`);
+      const response = await apiRequest("GET", "/messages/all");
       return response.json();
     },
     refetchInterval: 10000,
@@ -123,11 +119,6 @@ export default function MessagesPage() {
           <div>
             <h2 className="text-3xl font-bold text-foreground">Messages</h2>
             <p className="mt-1 text-foreground/70">Read and manage contact enquiries.</p>
-            <ListPagination
-              page={page}
-              hasNextPage={messages.length === PAGE_SIZE}
-              onPageChange={setPage}
-            />
           </div>
         </div>
 
@@ -142,7 +133,7 @@ export default function MessagesPage() {
         ) : (
           <div className="space-y-3">
             {filteredMessages.map((item) => (
-              <Card key={item._id} className={`cursor-pointer min-h-screen max-h-screen overflow-y-auto p-4 transition-colors hover:border-primary ${!item.isRead ? "border-primary/50 bg-primary/5" : ""}`} onClick={() => { setSelected(item); void markRead(item); }}>
+              <Card key={item._id} className={`cursor-pointer p-4 transition-colors hover:border-primary ${!item.isRead ? "border-primary/50 bg-primary/5" : ""}`} onClick={() => { setSelected(item); void markRead(item); }}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -165,7 +156,7 @@ export default function MessagesPage() {
         )}
       </section>
 
-      <Card className=" p-6 lg:sticky lg:top-6">
+      <Card className="h-fit p-6 lg:sticky lg:top-6">
         {selected ? (
           <>
             <div className="mb-5 flex items-start justify-between gap-4">

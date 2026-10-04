@@ -64,6 +64,12 @@ const sidebarItems = [
     icon: "✉️",
     permission: "messages.view",
   },
+  {
+    href: "/dashboard/users",
+    label: "User management",
+    icon: "🔐",
+    permission: "users.manage",
+  },
 ];
 
 type DashboardSidebarProps = {
