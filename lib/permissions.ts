@@ -21,6 +21,7 @@ export type Permission =
   | "content.manage"
   | "donations.view"
   | "settings.view"
+  | "ach.settings.manage"
   | "newsletter.view"
   | "messages.view"
   | "messages.manage"
@@ -63,6 +64,7 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "staff.manage",
     "messages.view",
     "messages.manage",
+    "ach.settings.manage",
   ],
   editor: [
     "blogs.view",

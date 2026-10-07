@@ -70,6 +70,12 @@ const sidebarItems = [
     icon: "🔐",
     permission: "users.manage",
   },
+  {
+    href: "/dashboard/settings",
+    label: "ACH settings",
+    icon: "⚙️",
+    permission: "ach.settings.manage",
+  },
 ];
 
 type DashboardSidebarProps = {

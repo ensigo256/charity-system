@@ -27,6 +27,12 @@ export interface SponsorshipRecord {
   lastPayment?: string;
   totalPaid: number;
   payments: PaymentRecord[];
+  achInstructionEmail?: {
+    status: "pending" | "sending" | "sent" | "failed";
+    attempts: number;
+    sentAt?: string | null;
+    lastError?: string;
+  };
   notes: string;
 }
 

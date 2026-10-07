@@ -7,7 +7,12 @@ import {
   Permission,
   UserRole,
 } from "@/lib/permissions";
-import { getAccessToken, setAccessToken } from "@/lib/session-token";
+import {
+  AUTH_SESSION_EXPIRED_EVENT,
+  getAccessToken,
+  setAccessToken,
+} from "@/lib/session-token";
+import { queryClient } from "@/lib/query-client";
 
 interface User {
   id: string;
@@ -48,10 +53,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const handleExpiredSession = () => {
+      setAccessToken(null);
+      setUser(null);
+      queryClient.clear();
+      setIsLoading(false);
+    };
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+    };
+  }, []);
+
+  useEffect(() => {
     const restoreSession = async () => {
       try {
         const data = await refreshSession();
-        if (!data?.token) return;
+        if (!data?.token) {
+          setAccessToken(null);
+          queryClient.clear();
+          return;
+        }
         setAccessToken(data.token);
 
         const response = await fetch(`${getApiBaseUrl()}/auth/admin/me`, {
@@ -60,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         if (!response.ok) {
           setAccessToken(null);
+          queryClient.clear();
           return;
         }
 
@@ -72,6 +96,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(restoredUser);
       } catch {
+        setAccessToken(null);
+        setUser(null);
+        queryClient.clear();
       } finally {
         setIsLoading(false);
       }
@@ -99,12 +126,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: data.username,
       role,
     };
+    queryClient.clear();
     setAccessToken(data.token);
     setUser(authenticatedUser);
   };
 
   const logout = () => {
     setUser(null);
+    queryClient.clear();
     const token = getAccessToken();
     setAccessToken(null);
     void (async () => {

@@ -46,6 +46,7 @@ import {
 import type { PaymentRecord, SponsorshipRecord } from "@/lib/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/query-client";
+import { useAuth } from "@/lib/auth-context";
 import { uploadImageToCloudinary } from "@/lib/cloudinary-upload";
 import { ListPagination } from "@/components/dashboard/list-pagination";
 
@@ -167,7 +168,11 @@ function getStatusClasses(status: SponsorshipStatus | string) {
 export default function SponsorshipsDashboard() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { can } = useAuth();
   const [page, setPage] = useState(1);
+  const [pledgePage, setPledgePage] = useState(1);
+  const [stripePledgePage, setStripePledgePage] = useState(1);
+  const [retryingPledgeId, setRetryingPledgeId] = useState("");
   const { data: sponsorships, isLoading } = useQuery<SponsorProfile[]>({
     queryKey: ["sponsors", "profiles", "all", page],
     queryFn: async () => {
@@ -186,6 +191,20 @@ export default function SponsorshipsDashboard() {
     queryKey: ["sponsors", "sponsorship", "records", page],
     queryFn: async () => {
       const response = await apiRequest("GET", `/sponsors/sponsorship/records?page=${page}&limit=${PAGE_SIZE}`);
+      return response.json();
+    },
+  });
+  const { data: pendingPublicPledges = [], isLoading: pendingPledgesLoading } = useQuery<SponsorshipRecord[]>({
+    queryKey: ["sponsors", "public", "pledges", "pending", pledgePage],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/sponsors/public/pledges/pending?page=${pledgePage}&limit=${PAGE_SIZE}`);
+      return response.json();
+    },
+  });
+  const { data: pendingStripePledges = [], isLoading: pendingStripePledgesLoading } = useQuery<SponsorshipRecord[]>({
+    queryKey: ["sponsors", "stripe", "payment-link-pledges", "pending", stripePledgePage],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/sponsors/stripe/payment-link-pledges/pending?page=${stripePledgePage}&limit=${PAGE_SIZE}`);
       return response.json();
     },
   });
@@ -219,6 +238,16 @@ export default function SponsorshipsDashboard() {
   const [sponsorFormError, setSponsorFormError] = useState("");
   const [paymentForm, setPaymentForm] = useState(initialPayment);
   const [activePledgeId, setActivePledgeId] = useState("");
+  const [activeStripePledgeId, setActiveStripePledgeId] = useState("");
+  const [stripePledgeSubmitting, setStripePledgeSubmitting] = useState(false);
+  const [stripePledgeError, setStripePledgeError] = useState("");
+  const [stripePledgeNotice, setStripePledgeNotice] = useState("");
+  const [stripePaymentReceipt, setStripePaymentReceipt] = useState({
+    amount: "",
+    date: new Date().toISOString().slice(0, 10),
+    stripeReference: "",
+    notes: "",
+  });
   const [pledgeReceipt, setPledgeReceipt] = useState({
     amount: "",
     date: new Date().toISOString().slice(0, 10),
@@ -234,14 +263,6 @@ export default function SponsorshipsDashboard() {
     () => (Array.isArray(sponsorships) ? sponsorships : []),
     [sponsorships],
   );
-  const pendingPublicPledges = useMemo(
-    () =>
-      records.filter(
-        (record) => record.publicPledgeReference && record.status === "Pending",
-      ),
-    [records],
-  );
-
   useEffect(() => {
     setRecords(Array.isArray(sponsorshipRecords) ? sponsorshipRecords : []);
   }, [sponsorshipRecords]);
@@ -659,6 +680,7 @@ export default function SponsorshipsDashboard() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] }),
         queryClient.invalidateQueries({ queryKey: ["sponsors", "sponsorship", "records"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "public", "pledges", "pending"] }),
         queryClient.invalidateQueries({ queryKey: ["children", "profiles"] }),
       ]);
     } catch (error) {
@@ -681,6 +703,7 @@ export default function SponsorshipsDashboard() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] }),
         queryClient.invalidateQueries({ queryKey: ["sponsors", "sponsorship", "records"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "public", "pledges", "pending"] }),
       ]);
     } catch (error) {
       setPledgeError(
@@ -688,6 +711,72 @@ export default function SponsorshipsDashboard() {
       );
     } finally {
       setPledgeSubmitting(false);
+    }
+  };
+
+  const handleRetryAchEmail = async (pledgeId: string) => {
+    setRetryingPledgeId(pledgeId);
+    setPledgeError("");
+    try {
+      await apiRequest("POST", `/sponsors/public/pledges/${pledgeId}/retry-ach-email`);
+      await queryClient.invalidateQueries({
+        queryKey: ["sponsors", "public", "pledges", "pending"],
+      });
+    } catch (error) {
+      setPledgeError(error instanceof Error ? error.message : "Unable to retry instruction email.");
+    } finally {
+      setRetryingPledgeId("");
+    }
+  };
+
+  const handleConfirmStripePledge = async () => {
+    if (!activeStripePledgeId || !stripePaymentReceipt.stripeReference.trim()) {
+      setStripePledgeError("Enter the Stripe payment reference before confirming.");
+      return;
+    }
+
+    const amount = Number(stripePaymentReceipt.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setStripePledgeError("Enter a valid received amount.");
+      return;
+    }
+
+    setStripePledgeSubmitting(true);
+    setStripePledgeError("");
+    setStripePledgeNotice("");
+    try {
+      const response = await apiRequest(
+        "POST",
+        `/sponsors/stripe/payment-link-pledges/${activeStripePledgeId}/confirm`,
+        {
+          amount,
+          date: stripePaymentReceipt.date,
+          stripeReference: stripePaymentReceipt.stripeReference.trim(),
+          notes: stripePaymentReceipt.notes.trim(),
+        },
+      );
+      const result = await response.json();
+      setStripePledgeNotice(result.message || "Stripe payment recorded.");
+      setActiveStripePledgeId("");
+      setStripePaymentReceipt({
+        amount: "",
+        date: new Date().toISOString().slice(0, 10),
+        stripeReference: "",
+        notes: "",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "sponsorship", "records"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "stripe", "payment-link-pledges", "pending"] }),
+        queryClient.invalidateQueries({ queryKey: ["children", "profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard", "summary"] }),
+      ]);
+    } catch (error) {
+      setStripePledgeError(
+        error instanceof Error ? error.message : "Unable to confirm Stripe payment.",
+      );
+    } finally {
+      setStripePledgeSubmitting(false);
     }
   };
 
@@ -846,13 +935,13 @@ export default function SponsorshipsDashboard() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
-              Pending public pledges
+              Pending ACH pledges
             </h2>
             <p className="text-sm text-muted-foreground">
               Record a transfer only after it appears in the organization&apos;s bank account.
             </p>
           </div>
-          <Badge variant="secondary">{pendingPublicPledges.length} pending</Badge>
+          <Badge variant="secondary">{pendingPublicPledges.length} shown</Badge>
         </div>
 
         {pledgeError ? (
@@ -861,7 +950,9 @@ export default function SponsorshipsDashboard() {
           </p>
         ) : null}
 
-        {pendingPublicPledges.length === 0 ? (
+        {pendingPledgesLoading ? (
+          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">Loading pending pledges...</p>
+        ) : pendingPublicPledges.length === 0 ? (
           <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
             No pending public pledges.
           </p>
@@ -871,6 +962,7 @@ export default function SponsorshipsDashboard() {
               const donor = pledge.donor || {};
               const child = pledge.child || {};
               const isReviewing = activePledgeId === pledge._id;
+              const emailStatus = pledge.achInstructionEmail?.status || "unknown";
 
               return (
                 <div key={pledge._id} className="rounded-lg border border-border bg-background p-4">
@@ -886,8 +978,22 @@ export default function SponsorshipsDashboard() {
                       <p className="text-xs text-muted-foreground">
                         Pledge reference: {pledge.publicPledgeReference}
                       </p>
+                      <p className="text-xs text-muted-foreground">
+                        Instruction email: {emailStatus}{pledge.achInstructionEmail?.attempts ? ` · ${pledge.achInstructionEmail.attempts} attempt(s)` : ""}
+                      </p>
                     </div>
                     <div className="flex gap-2">
+                      {emailStatus !== "sent" && can("ach.settings.manage") ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(retryingPledgeId)}
+                          onClick={() => void handleRetryAchEmail(pledge._id)}
+                        >
+                          {retryingPledgeId === pledge._id ? "Retrying..." : "Retry email"}
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         size="sm"
@@ -972,6 +1078,143 @@ export default function SponsorshipsDashboard() {
             })}
           </div>
         )}
+        <ListPagination
+          page={pledgePage}
+          hasNextPage={pendingPublicPledges.length === PAGE_SIZE}
+          onPageChange={setPledgePage}
+        />
+      </Card>
+
+      <Card className="mb-8 border-border bg-card p-4 sm:p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Pending Stripe Payment Link pledges</h2>
+            <p className="text-sm text-muted-foreground">
+              Match each payment in Stripe Dashboard before recording it here. A return from Stripe is not payment confirmation.
+            </p>
+          </div>
+          <Badge variant="secondary">{pendingStripePledges.length} shown</Badge>
+        </div>
+
+        {stripePledgeError ? (
+          <p role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {stripePledgeError}
+          </p>
+        ) : null}
+        {stripePledgeNotice ? (
+          <p role="status" className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            {stripePledgeNotice}
+          </p>
+        ) : null}
+
+        {pendingStripePledgesLoading ? (
+          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">Loading pending Stripe pledges...</p>
+        ) : pendingStripePledges.length === 0 ? (
+          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">No pending Stripe pledges.</p>
+        ) : (
+          <div className="space-y-3">
+            {pendingStripePledges.map((pledge) => {
+              const donor = pledge.donor || {};
+              const child = pledge.child || {};
+              const isReviewing = activeStripePledgeId === pledge._id;
+              const childName = [child.firstName, child.secondName].filter(Boolean).join(" ") || "Child";
+              return (
+                <div key={pledge._id} className="rounded-lg border border-border bg-background p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-foreground">
+                        {donor.profile?.fullName || donor.sponsor?.name || "Sponsor"} / {childName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {donor.profile?.email || "No email"} · Pledged ${Number(pledge.amount || 0).toFixed(2)} {pledge.currency || "USD"} / {pledge.frequency || "Monthly"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Pledge reference: {pledge.publicPledgeReference}</p>
+                      {Number(pledge.totalPaid || 0) > 0 ? (
+                        <p className="text-xs text-muted-foreground">Verified so far: ${Number(pledge.totalPaid).toFixed(2)} {pledge.currency || "USD"}</p>
+                      ) : null}
+                    </div>
+                    {can("sponsorships.manage") ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isReviewing ? "secondary" : "default"}
+                        onClick={() => {
+                          setActiveStripePledgeId(isReviewing ? "" : pledge._id);
+                          setStripePaymentReceipt({
+                            amount: String(Math.max(Number(pledge.amount || 0) - Number(pledge.totalPaid || 0), 0)),
+                            date: new Date().toISOString().slice(0, 10),
+                            stripeReference: "",
+                            notes: "",
+                          });
+                          setStripePledgeError("");
+                          setStripePledgeNotice("");
+                        }}
+                      >
+                        {isReviewing ? "Close review" : "Verify Stripe payment"}
+                      </Button>
+                    ) : null}
+                  </div>
+
+                  {isReviewing ? (
+                    <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor={`stripeReceivedAmount-${pledge._id}`}>Verified amount (USD)</Label>
+                        <Input
+                          id={`stripeReceivedAmount-${pledge._id}`}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={stripePaymentReceipt.amount}
+                          onChange={(event) => setStripePaymentReceipt({ ...stripePaymentReceipt, amount: event.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`stripeReceivedDate-${pledge._id}`}>Payment date</Label>
+                        <Input
+                          id={`stripeReceivedDate-${pledge._id}`}
+                          type="date"
+                          value={stripePaymentReceipt.date}
+                          onChange={(event) => setStripePaymentReceipt({ ...stripePaymentReceipt, date: event.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor={`stripePaymentReference-${pledge._id}`}>Stripe PaymentIntent ID</Label>
+                        <Input
+                          id={`stripePaymentReference-${pledge._id}`}
+                          placeholder="pi_..."
+                          value={stripePaymentReceipt.stripeReference}
+                          onChange={(event) => setStripePaymentReceipt({ ...stripePaymentReceipt, stripeReference: event.target.value })}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor={`stripeReceiptNotes-${pledge._id}`}>Notes (optional)</Label>
+                        <Input
+                          id={`stripeReceiptNotes-${pledge._id}`}
+                          value={stripePaymentReceipt.notes}
+                          onChange={(event) => setStripePaymentReceipt({ ...stripePaymentReceipt, notes: event.target.value })}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="mb-3 text-xs text-muted-foreground">
+                          A payment below the remaining pledge amount is recorded but keeps the sponsorship pending.
+                        </p>
+                        <Button type="button" disabled={stripePledgeSubmitting} onClick={() => void handleConfirmStripePledge()}>
+                          {stripePledgeSubmitting ? "Recording..." : "Record verified Stripe payment"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <ListPagination
+          page={stripePledgePage}
+          hasNextPage={pendingStripePledges.length === PAGE_SIZE}
+          onPageChange={setStripePledgePage}
+        />
       </Card>
 
       {!isLoading && (

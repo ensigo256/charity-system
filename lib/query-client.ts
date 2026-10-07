@@ -1,6 +1,10 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import axios from "axios";
-import { getAccessToken, setAccessToken } from "@/lib/session-token";
+import {
+  AUTH_SESSION_EXPIRED_EVENT,
+  getAccessToken,
+  setAccessToken,
+} from "@/lib/session-token";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5454/api";
@@ -21,7 +25,12 @@ async function refreshAccessToken() {
       credentials: "include",
     })
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          if (response.status === 401 && typeof window !== "undefined") {
+            window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
+          }
+          return null;
+        }
         const data = await response.json();
         const token = typeof data.token === "string" ? data.token : null;
         setAccessToken(token);
@@ -201,24 +210,35 @@ export const getQueryFn: <T>(options: {
       let response;
       try {
         response = await request();
-      } catch (error: any) {
-        if (error.response?.status !== 401) throw error;
+      } catch (error: unknown) {
+        if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+          throw error;
+        }
         const token = await refreshAccessToken();
         if (!token) throw error;
         response = await request();
       }
 
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (axios.isCancel(error)) {
         throw new Error("Request cancelled");
       }
 
-      if (error.response?.status === 401 && on401 === "returnNull") {
+      if (
+        axios.isAxiosError(error) &&
+        error.response?.status === 401 &&
+        on401 === "returnNull"
+      ) {
         return null;
       }
 
-      throw new Error(error.response?.data || error.message);
+      if (axios.isAxiosError(error)) {
+        throw new Error(
+          getServerErrorMessage(error.response?.data, error.message),
+        );
+      }
+      throw new Error(error instanceof Error ? error.message : "Request failed");
     } finally {
       clearTimeout(timer);
     }
