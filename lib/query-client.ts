@@ -7,7 +7,7 @@ import {
 } from "@/lib/session-token";
 
 const BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5454/api";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "https://ensigo-server.onrender.com/api";
 
 function getAuthHeaders() {
   if (typeof window === "undefined") return {};

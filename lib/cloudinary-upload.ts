@@ -5,7 +5,7 @@ async function uploadImageToCloudinary(file: File) {
 
   const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
   const uploadPreset =
-    process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "charity_uploads";
+    process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "production_preset";
 
   const formData = new FormData();
   formData.append("file", file);
