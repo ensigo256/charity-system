@@ -8,8 +8,10 @@ import {
   UserRole,
 } from "@/lib/permissions";
 import {
+  API_BASE_URL,
   AUTH_SESSION_EXPIRED_EVENT,
   getAccessToken,
+  refreshAccessToken,
   setAccessToken,
 } from "@/lib/session-token";
 import { queryClient } from "@/lib/query-client";
@@ -31,21 +33,8 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-function getApiBaseUrl() {
-  return process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5454/api";
-}
-
 function getAuthHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
-}
-
-async function refreshSession() {
-  const response = await fetch(`${getApiBaseUrl()}/auth/admin/refresh`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!response.ok) return null;
-  return response.json();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -69,16 +58,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const restoreSession = async () => {
       try {
-        const data = await refreshSession();
-        if (!data?.token) {
+        const token = await refreshAccessToken();
+        if (!token) {
           setAccessToken(null);
           queryClient.clear();
           return;
         }
-        setAccessToken(data.token);
 
-        const response = await fetch(`${getApiBaseUrl()}/auth/admin/me`, {
-          headers: getAuthHeaders(data.token),
+        const response = await fetch(`${API_BASE_URL}/auth/admin/me`, {
+          headers: getAuthHeaders(token),
           credentials: "include",
         });
         if (!response.ok) {
@@ -108,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const response = await fetch(`${getApiBaseUrl()}/auth/admin/login`, {
+    const response = await fetch(`${API_BASE_URL}/auth/admin/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -137,11 +125,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = getAccessToken();
     setAccessToken(null);
     void (async () => {
-      const refreshedSession = await refreshSession();
-      const activeToken = refreshedSession?.token || token;
+      const activeToken = (await refreshAccessToken()) || token;
       if (!activeToken) return;
 
-      await fetch(`${getApiBaseUrl()}/auth/admin/logout`, {
+      await fetch(`${API_BASE_URL}/auth/admin/logout`, {
         method: "POST",
         headers: getAuthHeaders(activeToken),
         credentials: "include",

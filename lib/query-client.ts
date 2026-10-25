@@ -1,48 +1,18 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import axios from "axios";
 import {
-  AUTH_SESSION_EXPIRED_EVENT,
+  API_BASE_URL,
   getAccessToken,
-  setAccessToken,
+  refreshAccessToken,
 } from "@/lib/session-token";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "https://ensigo-server.onrender.com/api";
+const BASE_URL = API_BASE_URL;
 
 function getAuthHeaders() {
   if (typeof window === "undefined") return {};
 
   const token = getAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-let refreshPromise: Promise<string | null> | null = null;
-
-async function refreshAccessToken() {
-  if (!refreshPromise) {
-    refreshPromise = fetch(`${BASE_URL}/auth/admin/refresh`, {
-      method: "POST",
-      credentials: "include",
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          if (response.status === 401 && typeof window !== "undefined") {
-            window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
-          }
-          return null;
-        }
-        const data = await response.json();
-        const token = typeof data.token === "string" ? data.token : null;
-        setAccessToken(token);
-        return token;
-      })
-      .catch(() => null)
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
-
-  return refreshPromise;
 }
 
 // simple in-memory rate limit tracker (requests per window)
