@@ -110,7 +110,6 @@ type SponsorForm = {
   period: string;
   expectedFundsDate: string;
   remindByEmail: boolean;
-  paymentMethod: string;
   childId: string;
   startDate: string;
   image: { url: string; public_id: string };
@@ -138,7 +137,6 @@ const initialSponsorForm: SponsorForm = {
   period: "Monthly",
   expectedFundsDate: "",
   remindByEmail: true,
-  paymentMethod: "ach",
   childId: "",
   startDate: new Date().toISOString().slice(0, 10),
   image: { url: "", public_id: "" },
@@ -326,7 +324,6 @@ export default function SponsorshipsDashboard() {
       expectedFundsDate:
         String(selectedSponsorProfile?.donation?.expectedFundsDate || current.expectedFundsDate || "").slice(0, 10),
       remindByEmail: Boolean(selectedSponsorProfile?.donation?.remindByEmail ?? current.remindByEmail),
-      paymentMethod: selectedSponsorProfile?.paymentMethod || current.paymentMethod,
       image: selectedSponsorProfile?.image || current.image,
     }));
     setIsEditProfileOpen(true);
@@ -439,7 +436,6 @@ export default function SponsorshipsDashboard() {
           expectedFundsDate: sponsorForm.expectedFundsDate || undefined,
           remindByEmail: sponsorForm.remindByEmail,
         },
-        paymentMethod: sponsorForm.paymentMethod,
         startDate: sponsorForm.startDate,
         expectedFundsDate: sponsorForm.expectedFundsDate || undefined,
         status: "Active",
@@ -963,6 +959,11 @@ export default function SponsorshipsDashboard() {
               const child = pledge.child || {};
               const isReviewing = activePledgeId === pledge._id;
               const emailStatus = pledge.achInstructionEmail?.status || "unknown";
+              const totalPaid = Number(pledge.totalPaid || 0);
+              const remainingAmount = Math.max(
+                Number(pledge.amount || 0) - totalPaid,
+                0,
+              );
 
               return (
                 <div key={pledge._id} className="rounded-lg border border-border bg-background p-4">
@@ -974,6 +975,9 @@ export default function SponsorshipsDashboard() {
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {donor.profile?.email || "No email"} · ${pledge.amount} {pledge.currency || "USD"} / {pledge.frequency || "Monthly"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Received: ${totalPaid.toFixed(2)} · Remaining: ${remainingAmount.toFixed(2)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Pledge reference: {pledge.publicPledgeReference}
@@ -1001,7 +1005,7 @@ export default function SponsorshipsDashboard() {
                         onClick={() => {
                           setActivePledgeId(isReviewing ? "" : pledge._id);
                           setPledgeReceipt({
-                            amount: String(pledge.amount || ""),
+                            amount: remainingAmount > 0 ? remainingAmount.toFixed(2) : "",
                             date: new Date().toISOString().slice(0, 10),
                             bankReference: "",
                             notes: "",
@@ -1031,6 +1035,7 @@ export default function SponsorshipsDashboard() {
                           id={`receivedAmount-${pledge._id}`}
                           type="number"
                           min="0.01"
+                          max={remainingAmount}
                           step="0.01"
                           value={pledgeReceipt.amount}
                           onChange={(event) => setPledgeReceipt({ ...pledgeReceipt, amount: event.target.value })}
@@ -1068,7 +1073,7 @@ export default function SponsorshipsDashboard() {
                           disabled={pledgeSubmitting}
                           onClick={() => void handleConfirmPublicPledge()}
                         >
-                          {pledgeSubmitting ? "Recording..." : "Confirm bank receipt and activate"}
+                          {pledgeSubmitting ? "Recording..." : "Record received transfer"}
                         </Button>
                       </div>
                     </div>
@@ -1649,27 +1654,6 @@ export default function SponsorshipsDashboard() {
                     }
                     placeholder="Country"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label  className="text-muted-foreground" htmlFor="sponsorPaymentMethod">Payment method</Label>
-                  <Select
-                    value={sponsorForm.paymentMethod}
-                    onValueChange={(value) =>
-                      setSponsorForm({ ...sponsorForm, paymentMethod: value })
-                    }
-                  >
-                    <SelectTrigger id="sponsorPaymentMethod" className="w-full bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="zelle">Zelle</SelectItem>
-                      <SelectItem value="stripe">Stripe</SelectItem>
-                      <SelectItem value="check">Check</SelectItem>
-                      <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="paypal">PayPal</SelectItem>
-                      <SelectItem value="ach">ACH</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
               </div>
             </div>
@@ -2341,10 +2325,6 @@ export default function SponsorshipsDashboard() {
                             <SelectValue placeholder="Select method" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Zelle">Zelle</SelectItem>
-                            <SelectItem value="Stripe">Stripe</SelectItem>
-                            <SelectItem value="Check">Check</SelectItem>
-                            <SelectItem value="PayPal">PayPal</SelectItem>
                             <SelectItem value="ACH">ACH</SelectItem>
                           </SelectContent>
                         </Select>

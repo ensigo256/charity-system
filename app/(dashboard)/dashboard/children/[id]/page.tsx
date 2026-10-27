@@ -40,6 +40,10 @@ import { ServerError } from "@/components/ui/server-error";
 import { jsPDF } from "jspdf";
 import type { SponsorshipProfile } from "@/lib/types";
 import {
+  calculateAgeFromDateOfBirth,
+  toDateInputValue,
+} from "@/lib/child-profile-form";
+import {
   ArrowLeft,
   Download,
   Link2,
@@ -284,8 +288,11 @@ export default function ChildDetailPage() {
       secondName: profile.secondName || "",
       givenName: profile.givenName || "",
       gender: profile.gender || "Female",
-      dateOfBirth: profile.dateOfBirth || "",
-      age: profile.age || 0,
+      dateOfBirth: toDateInputValue(profile.dateOfBirth),
+      age:
+        calculateAgeFromDateOfBirth(toDateInputValue(profile.dateOfBirth)) ??
+        profile.age ??
+        0,
       class: profile.class || "",
       nationality: profile.nationality || "",
       familyStatus: profile.familyStatus || "Single Parent",
@@ -301,7 +308,7 @@ export default function ChildDetailPage() {
         : typeof profile.needs === "string"
           ? profile.needs
           : "",
-      monthlyNeed: profile.monthlyNeed || "",
+      monthlyNeed: String(profile.monthlyNeed ?? ""),
       sponsorshipStatus: profile.sponsorshipStatus || "Available",
       education: {
         currentLevel: profile.education?.currentLevel || "",
@@ -651,7 +658,6 @@ export default function ChildDetailPage() {
           period: "Monthly",
           remindByEmail: true,
         },
-        paymentMethod: "zelle",
         startDate: sponsorshipStartDate,
         status: "Active",
       });
@@ -2284,12 +2290,14 @@ export default function ChildDetailPage() {
                     id="dateOfBirth"
                     type="date"
                     value={formState.dateOfBirth}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const dateOfBirth = event.target.value;
                       setFormState({
                         ...formState,
-                        dateOfBirth: event.target.value,
-                      })
-                    }
+                        dateOfBirth,
+                        age: calculateAgeFromDateOfBirth(dateOfBirth) ?? 0,
+                      });
+                    }}
                   />
                 </div>
                 <div className="space-y-2">

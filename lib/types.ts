@@ -61,7 +61,7 @@ export interface SponsorshipProfile {
   school?: string;
   location?: string;
   needs?: any;
-  monthlyNeed?: string;
+  monthlyNeed?: number | string;
   education?: {
     isStudying?: boolean;
     educationStage?: string;

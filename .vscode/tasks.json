@@ -1,0 +1,31 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Inspect message feature validation targets",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"git status --short; Get-Content package.json; Get-ChildItem -Recurse -Filter package.json -File | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $_.FullName }"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Dashboard TypeScript compile",
+			"type": "shell",
+			"command": "pnpm",
+			"args": [
+				"exec",
+				"tsc",
+				"--noEmit"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			]
+		}
+	]
+}

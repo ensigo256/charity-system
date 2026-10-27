@@ -49,6 +49,10 @@ import { ServerError } from "@/components/ui/server-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { jsPDF } from "jspdf";
 import { ListPagination } from "@/components/dashboard/list-pagination";
+import {
+  calculateAgeFromDateOfBirth,
+  toDateInputValue,
+} from "@/lib/child-profile-form";
 
 const PAGE_SIZE = 25;
 
@@ -142,7 +146,9 @@ function normalizeEducationLevel(value?: string) {
 }
 
 function textValue(value: unknown) {
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : "";
 }
 
 type FormState = typeof initialFormState;
@@ -798,8 +804,11 @@ export default function ChildrenDashboard() {
       secondName: textValue(child.secondName),
       givenName: textValue(child.givenName),
       gender: child.gender,
-      dateOfBirth: child.dateOfBirth,
-      age: child.age,
+      dateOfBirth: toDateInputValue(child.dateOfBirth),
+      age:
+        calculateAgeFromDateOfBirth(toDateInputValue(child.dateOfBirth)) ??
+        child.age ??
+        0,
       ageGroup: child.ageGroup,
       class: child.class,
       nationality: child.nationality,
@@ -947,7 +956,6 @@ export default function ChildrenDashboard() {
           period: "Monthly",
           remindByEmail: true,
         },
-        paymentMethod: "zelle",
         startDate: assignmentForm.startDate,
         status: "Active",
       };
@@ -1190,7 +1198,6 @@ export default function ChildrenDashboard() {
                 phone: selectedSponsor.phone,
               },
               donation: { amount: 0, period: "Monthly", remindByEmail: true },
-              paymentMethod: "zelle",
               startDate: assignmentForm.startDate,
               status: "Active",
             });
@@ -1316,12 +1323,14 @@ export default function ChildrenDashboard() {
                 id="dateOfBirth"
                 type="date"
                 value={formState.dateOfBirth}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const dateOfBirth = event.target.value;
                   setFormState({
                     ...formState,
-                    dateOfBirth: event.target.value,
-                  })
-                }
+                    dateOfBirth,
+                    age: calculateAgeFromDateOfBirth(dateOfBirth) ?? 0,
+                  });
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -1910,12 +1919,14 @@ export default function ChildrenDashboard() {
                 id="dateOfBirth"
                 type="date"
                 value={formState.dateOfBirth}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const dateOfBirth = event.target.value;
                   setFormState({
                     ...formState,
-                    dateOfBirth: event.target.value,
-                  })
-                }
+                    dateOfBirth,
+                    age: calculateAgeFromDateOfBirth(dateOfBirth) ?? 0,
+                  });
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -1923,7 +1934,7 @@ export default function ChildrenDashboard() {
               <Input
                 className="bg-background"
                 id="age"
-                type="string"
+                type="number"
                 value={formState.age}
                 onChange={(event) =>
                   setFormState({

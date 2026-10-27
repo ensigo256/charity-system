@@ -203,7 +203,7 @@ export default function SponsorDetailPage() {
     amount: "",
     currency: "UGX",
     date: new Date().toISOString().slice(0, 10),
-    method: "Cash",
+    method: "ACH",
     transactionId: "",
     notes: "",
     splitDonation: false,
@@ -227,7 +227,6 @@ export default function SponsorDetailPage() {
     period: "Monthly",
     expectedFundsDate: "",
     remindByEmail: true,
-    paymentMethod: "zelle",
     childId: "",
     startDate: new Date().toISOString().slice(0, 10),
   });
@@ -712,7 +711,6 @@ export default function SponsorDetailPage() {
         ? new Date(sponsor.donation.expectedFundsDate).toISOString().slice(0, 10)
         : "",
       remindByEmail: sponsor.donation?.remindByEmail !== false,
-      paymentMethod: sponsor.paymentMethod || "zelle",
       childId:
         typeof sponsor.child === "string"
           ? sponsor.child
@@ -814,7 +812,6 @@ export default function SponsorDetailPage() {
             expectedFundsDate: formState.expectedFundsDate || undefined,
             remindByEmail: formState.remindByEmail,
           },
-          paymentMethod: formState.paymentMethod,
           childId: formState.childId || undefined,
           startDate: formState.startDate,
         },
@@ -1767,31 +1764,6 @@ export default function SponsorDetailPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="editSponsorPaymentMethod">Payment method</Label>
-              <Select
-                value={formState.paymentMethod}
-                onValueChange={(value) =>
-                  setFormState((current) => ({
-                    ...current,
-                    paymentMethod: value,
-                  }))
-                }
-              >
-                <SelectTrigger id="editSponsorPaymentMethod" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="zelle">Zelle</SelectItem>
-                  <SelectItem value="stripe">Stripe</SelectItem>
-                  <SelectItem value="check">Check</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="paypal">PayPal</SelectItem>
-                  <SelectItem value="ach">ACH</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
               <Label htmlFor="editSponsorAmount">Amount</Label>
               <Input
                 id="editSponsorAmount"
@@ -2007,17 +1979,7 @@ export default function SponsorDetailPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[
-                      "Cash",
-                      "Bank Transfer",
-                      "Mobile Money",
-                      "Check",
-                      "Other",
-                    ].map((method) => (
-                      <SelectItem key={method} value={method}>
-                        {method}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="ACH">ACH</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
