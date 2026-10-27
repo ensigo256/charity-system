@@ -68,6 +68,10 @@ type SponsorProfile = {
     zipCode?: string;
     bio?: string;
   };
+  sponsor?: {
+    name?: string;
+    email?: string;
+  };
   location?: {
     address?: string;
     country?: string;
@@ -93,6 +97,29 @@ type PaymentForm = {
   method: string;
   txnId: string;
   note: string;
+};
+
+type StripePaymentAttempt = {
+  _id: string;
+  publicReference: string;
+  expectedAmount: number;
+  dueDate: string;
+  dueDateKey: string;
+  status: "awaiting_verification" | "needs_management_review" | "expired";
+  createdAt: string;
+  resolutionNotes?: string;
+  adminEmailSentAt?: string | null;
+  adminEmailError?: string;
+  inAppNotificationError?: string;
+  sponsorship?: {
+    _id: string;
+    amount: number;
+    currency?: string;
+    frequency?: string;
+    publicPledgeReference?: string;
+    donor?: SponsorProfile;
+    child?: { firstName?: string; secondName?: string; givenName?: string };
+  };
 };
 
 type SponsorForm = {
@@ -170,6 +197,7 @@ export default function SponsorshipsDashboard() {
   const [page, setPage] = useState(1);
   const [pledgePage, setPledgePage] = useState(1);
   const [stripePledgePage, setStripePledgePage] = useState(1);
+  const [stripeAttemptPage, setStripeAttemptPage] = useState(1);
   const [retryingPledgeId, setRetryingPledgeId] = useState("");
   const { data: sponsorships, isLoading } = useQuery<SponsorProfile[]>({
     queryKey: ["sponsors", "profiles", "all", page],
@@ -206,6 +234,20 @@ export default function SponsorshipsDashboard() {
       return response.json();
     },
   });
+  const { data: stripeAttemptData, isLoading: stripeAttemptsLoading } = useQuery<{
+    attempts: StripePaymentAttempt[];
+    total: number;
+  }>({
+    queryKey: ["sponsors", "stripe", "payment-attempts", "pending", stripeAttemptPage],
+    queryFn: async () => {
+      const response = await apiRequest(
+        "GET",
+        `/sponsors/stripe/payment-attempts/pending?page=${stripeAttemptPage}&limit=${PAGE_SIZE}`,
+      );
+      return response.json();
+    },
+  });
+  const pendingStripeAttempts = stripeAttemptData?.attempts || [];
 
   const [records, setRecords] = useState<SponsorshipRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -240,6 +282,15 @@ export default function SponsorshipsDashboard() {
   const [stripePledgeSubmitting, setStripePledgeSubmitting] = useState(false);
   const [stripePledgeError, setStripePledgeError] = useState("");
   const [stripePledgeNotice, setStripePledgeNotice] = useState("");
+  const [activeStripeAttemptId, setActiveStripeAttemptId] = useState("");
+  const [stripeAttemptSubmitting, setStripeAttemptSubmitting] = useState(false);
+  const [stripeAttemptError, setStripeAttemptError] = useState("");
+  const [stripeAttemptNotice, setStripeAttemptNotice] = useState("");
+  const [stripeAttemptReceipt, setStripeAttemptReceipt] = useState({
+    amount: "",
+    date: new Date().toISOString().slice(0, 10),
+    stripeReference: "",
+  });
   const [stripePaymentReceipt, setStripePaymentReceipt] = useState({
     amount: "",
     date: new Date().toISOString().slice(0, 10),
@@ -776,6 +827,83 @@ export default function SponsorshipsDashboard() {
     }
   };
 
+  const handleApproveStripeAttempt = async () => {
+    if (!activeStripeAttemptId || !stripeAttemptReceipt.stripeReference.trim()) {
+      setStripeAttemptError("Enter the verified Stripe PaymentIntent ID.");
+      return;
+    }
+    const amount = Number(stripeAttemptReceipt.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setStripeAttemptError("Enter a valid verified payment amount.");
+      return;
+    }
+
+    setStripeAttemptSubmitting(true);
+    setStripeAttemptError("");
+    setStripeAttemptNotice("");
+    try {
+      const response = await apiRequest(
+        "POST",
+        `/sponsors/stripe/payment-attempts/${activeStripeAttemptId}/approve`,
+        {
+          amount,
+          date: stripeAttemptReceipt.date,
+          stripeReference: stripeAttemptReceipt.stripeReference.trim(),
+        },
+      );
+      const result = await response.json();
+      setStripeAttemptNotice(result.message || "Stripe payment approved.");
+      setActiveStripeAttemptId("");
+      setStripeAttemptReceipt({
+        amount: "",
+        date: new Date().toISOString().slice(0, 10),
+        stripeReference: "",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "stripe", "payment-attempts", "pending"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "stripe", "payment-link-pledges", "pending"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "sponsorship", "records"] }),
+        queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] }),
+        queryClient.invalidateQueries({ queryKey: ["children", "profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard", "summary"] }),
+      ]);
+    } catch (error) {
+      setStripeAttemptError(
+        error instanceof Error ? error.message : "Unable to approve Stripe payment.",
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["sponsors", "stripe", "payment-attempts", "pending"],
+      });
+    } finally {
+      setStripeAttemptSubmitting(false);
+    }
+  };
+
+  const handleExpireStripeAttempt = async (attemptId: string) => {
+    setStripeAttemptSubmitting(true);
+    setStripeAttemptError("");
+    setStripeAttemptNotice("");
+    try {
+      const response = await apiRequest(
+        "POST",
+        `/sponsors/stripe/payment-attempts/${attemptId}/expire`,
+        { notes: "Expired or escalated after manual review by staff." },
+      );
+      const result = await response.json();
+      setStripeAttemptNotice(result.message || "Payment attempt closed.");
+      setActiveStripeAttemptId("");
+      await queryClient.invalidateQueries({
+        queryKey: ["sponsors", "stripe", "payment-attempts", "pending"],
+      });
+    } catch (error) {
+      setStripeAttemptError(
+        error instanceof Error ? error.message : "Unable to close payment attempt.",
+      );
+    } finally {
+      setStripeAttemptSubmitting(false);
+    }
+  };
+
   const downloadCsv = () => {
     const headers = [
       "Sponsor",
@@ -926,6 +1054,168 @@ export default function SponsorshipsDashboard() {
           </>
         )}
       </div>
+
+      <Card className="mb-8 border-border bg-card p-4 sm:p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Stripe payment attempts awaiting verification</h2>
+            <p className="text-sm text-muted-foreground">
+              A button click only records intent. Check Stripe Dashboard and approve only a payment you have verified.
+            </p>
+          </div>
+          <Badge variant="secondary">{stripeAttemptData?.total || 0} pending</Badge>
+        </div>
+
+        {stripeAttemptError ? (
+          <p role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {stripeAttemptError}
+          </p>
+        ) : null}
+        {stripeAttemptNotice ? (
+          <p role="status" className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            {stripeAttemptNotice}
+          </p>
+        ) : null}
+        {stripeAttemptsLoading ? (
+          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">Loading Stripe payment attempts...</p>
+        ) : pendingStripeAttempts.length === 0 ? (
+          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">No Stripe payment attempts need review.</p>
+        ) : (
+          <div className="space-y-3">
+            {pendingStripeAttempts.map((attempt) => {
+              const sponsorship = attempt.sponsorship;
+              const donor = sponsorship?.donor;
+              const child = sponsorship?.child;
+              const childName = [child?.givenName || child?.firstName, child?.secondName]
+                .filter(Boolean)
+                .join(" ") || "Child";
+              const reviewing = activeStripeAttemptId === attempt._id;
+              const requiresManagement = attempt.status === "needs_management_review";
+              const isExpired = attempt.status === "expired";
+              return (
+                <div key={attempt._id} className="rounded-lg border border-border bg-background p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-foreground">
+                        {donor?.profile?.fullName || donor?.sponsor?.name || "Sponsor"} / {childName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {donor?.profile?.email || "No email"} · Expected ${Number(attempt.expectedAmount).toFixed(2)} {sponsorship?.currency || "USD"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Attempt: {attempt.publicReference} · Pledge: {sponsorship?.publicPledgeReference || sponsorship?._id}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {requiresManagement
+                          ? "Management review required"
+                          : isExpired
+                            ? "Expired — verify manually if checkout completed late"
+                            : "Awaiting Stripe verification"} · Started {new Date(attempt.createdAt).toLocaleString()}
+                      </p>
+                      {attempt.adminEmailError || attempt.inAppNotificationError ? (
+                        <p className="text-xs text-destructive">
+                          An admin alert could not be delivered: {attempt.adminEmailError || attempt.inAppNotificationError}
+                        </p>
+                      ) : null}
+                      {attempt.resolutionNotes ? (
+                        <p className="text-sm font-medium text-amber-800">{attempt.resolutionNotes}</p>
+                      ) : null}
+                    </div>
+                    {can("sponsorships.manage") ? (
+                      <div className="flex flex-wrap gap-2">
+                        {!requiresManagement ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={reviewing ? "secondary" : "default"}
+                            onClick={() => {
+                              setActiveStripeAttemptId(reviewing ? "" : attempt._id);
+                              setStripeAttemptReceipt({
+                                amount: String(attempt.expectedAmount),
+                                date: new Date().toISOString().slice(0, 10),
+                                stripeReference: "",
+                              });
+                              setStripeAttemptError("");
+                              setStripeAttemptNotice("");
+                            }}
+                          >
+                            {reviewing ? "Close review" : isExpired ? "Review expired attempt" : "Verify and approve"}
+                          </Button>
+                        ) : null}
+                        {!isExpired ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={stripeAttemptSubmitting}
+                            onClick={() => void handleExpireStripeAttempt(attempt._id)}
+                          >
+                            {requiresManagement ? "Close after management review" : "Expire attempt"}
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  {reviewing && !requiresManagement ? (
+                    <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor={`stripeAttemptAmount-${attempt._id}`}>Actual verified amount (USD)</Label>
+                        <Input
+                          id={`stripeAttemptAmount-${attempt._id}`}
+                          type="number"
+                          min="0.01"
+                          max={attempt.expectedAmount}
+                          step="0.01"
+                          value={stripeAttemptReceipt.amount}
+                          onChange={(event) => setStripeAttemptReceipt({ ...stripeAttemptReceipt, amount: event.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`stripeAttemptDate-${attempt._id}`}>Payment date</Label>
+                        <Input
+                          id={`stripeAttemptDate-${attempt._id}`}
+                          type="date"
+                          value={stripeAttemptReceipt.date}
+                          onChange={(event) => setStripeAttemptReceipt({ ...stripeAttemptReceipt, date: event.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor={`stripeAttemptReference-${attempt._id}`}>Stripe PaymentIntent ID</Label>
+                        <Input
+                          id={`stripeAttemptReference-${attempt._id}`}
+                          placeholder="pi_..."
+                          value={stripeAttemptReceipt.stripeReference}
+                          onChange={(event) => setStripeAttemptReceipt({ ...stripeAttemptReceipt, stripeReference: event.target.value })}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="mb-3 text-xs text-muted-foreground">
+                          {isExpired
+                            ? "This attempt expired, but staff can still approve it if Stripe Dashboard confirms payment. An amount above the pledge is blocked for management resolution."
+                            : "An amount above the pledge is blocked for management resolution. Do not approve until you have verified the transaction in Stripe Dashboard."}
+                        </p>
+                        <Button
+                          type="button"
+                          disabled={stripeAttemptSubmitting}
+                          onClick={() => void handleApproveStripeAttempt()}
+                        >
+                          {stripeAttemptSubmitting ? "Approving..." : "Approve verified payment"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <ListPagination
+          page={stripeAttemptPage}
+          hasNextPage={pendingStripeAttempts.length === PAGE_SIZE}
+          onPageChange={setStripeAttemptPage}
+        />
+      </Card>
 
       <Card className="mb-8 border-border bg-card p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

@@ -32,6 +32,7 @@ type AchSettingsForm = {
 type StripePaymentLinkSettings = {
   configured: boolean;
   paymentLinkUrl: string;
+  adminAlertEmail: string;
   source: "dashboard" | "environment" | "none" | "invalid";
 };
 
@@ -48,6 +49,7 @@ export default function AchSettingsPage() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<Partial<AchSettingsForm>>({});
   const [stripeLinkForm, setStripeLinkForm] = useState<string | null>(null);
+  const [stripeAlertEmailForm, setStripeAlertEmailForm] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [stripeNotice, setStripeNotice] = useState("");
 
@@ -83,13 +85,14 @@ export default function AchSettingsPage() {
   });
 
   const saveStripeLinkMutation = useMutation({
-    mutationFn: async (paymentLinkUrl: string) => {
-      const response = await apiRequest("PUT", "/sponsors/settings/stripe-payment-link", { paymentLinkUrl });
+    mutationFn: async (settings: { paymentLinkUrl: string; adminAlertEmail: string }) => {
+      const response = await apiRequest("PUT", "/sponsors/settings/stripe-payment-link", settings);
       return response.json();
     },
     onSuccess: async (result) => {
       setStripeNotice(result.message || "Stripe Payment Link saved.");
       setStripeLinkForm(null);
+      setStripeAlertEmailForm(null);
       await queryClient.invalidateQueries({ queryKey: ["sponsors", "settings", "stripe-payment-link"] });
     },
     onError: (error) => {
@@ -102,6 +105,12 @@ export default function AchSettingsPage() {
     setForm((current) => ({ ...current, [field]: value }));
   };
   const stripePaymentLinkUrl = stripeLinkForm ?? stripeLinkData?.paymentLinkUrl ?? "";
+  const stripeAlertEmail =
+    stripeAlertEmailForm ??
+    stripeLinkData?.adminAlertEmail ??
+    "info@ensigooflove.org";
+  const isValidAlertEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) && value.trim().length <= 254;
   const isValidStripePaymentLink = (value: string) => {
     try {
       const url = new URL(value.trim());
@@ -238,7 +247,14 @@ export default function AchSettingsPage() {
                 setStripeNotice("Enter an HTTPS link hosted by buy.stripe.com or donate.stripe.com.");
                 return;
               }
-              saveStripeLinkMutation.mutate(stripePaymentLinkUrl.trim());
+              if (!isValidAlertEmail(stripeAlertEmail)) {
+                setStripeNotice("Enter a valid admin notification email.");
+                return;
+              }
+              saveStripeLinkMutation.mutate({
+                paymentLinkUrl: stripePaymentLinkUrl.trim(),
+                adminAlertEmail: stripeAlertEmail.trim(),
+              });
             }}
           >
             <div className="space-y-2">
@@ -261,9 +277,27 @@ export default function AchSettingsPage() {
                 Use the client&apos;s public Payment Link configured for a donor-chosen one-time amount and payer name/email collection. Do not enter Stripe API or webhook keys here.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="stripe-payment-alert-email">Payment attempt alert email</Label>
+              <Input
+                id="stripe-payment-alert-email"
+                type="email"
+                autoComplete="email"
+                value={stripeAlertEmail}
+                onChange={(event) => {
+                  setStripeNotice("");
+                  setStripeAlertEmailForm(event.target.value);
+                }}
+                aria-invalid={Boolean(stripeAlertEmail) && !isValidAlertEmail(stripeAlertEmail)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Alerts say that a sponsor started checkout and staff should verify it in Stripe; they do not confirm payment.
+              </p>
+            </div>
             {stripeNotice ? <p role="status" className="text-sm text-foreground">{stripeNotice}</p> : null}
             <div className="flex justify-end border-t border-border pt-5">
-              <Button type="submit" disabled={saveStripeLinkMutation.isPending || !isValidStripePaymentLink(stripePaymentLinkUrl)}>
+              <Button type="submit" disabled={saveStripeLinkMutation.isPending || !isValidStripePaymentLink(stripePaymentLinkUrl) || !isValidAlertEmail(stripeAlertEmail)}>
                 {saveStripeLinkMutation.isPending ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
                 {saveStripeLinkMutation.isPending ? "Saving..." : "Save Stripe Payment Link"}
               </Button>
