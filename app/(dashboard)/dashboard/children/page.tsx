@@ -40,7 +40,11 @@ import {
   Eye,
   Download,
 } from "lucide-react";
-import type { SponsorshipProfile } from "@/lib/types";
+import type {
+  SponsorRecord,
+  SponsorshipProfile,
+  SponsorshipRecord,
+} from "@/lib/types";
 import { uploadImageToCloudinary } from "@/lib/cloudinary-upload";
 import { apiRequest } from "@/lib/query-client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -177,7 +181,14 @@ function formatList(value: any) {
 }
 
 function getSponsorLabel(child: SponsorshipProfile) {
-  const sponsor = (child as any).sponsor;
+  const sponsorCount = Number(
+    child.sponsorCount ?? child.sponsorships?.length ?? 0,
+  );
+  if (sponsorCount > 0) {
+    return `${sponsorCount} current ${sponsorCount === 1 ? "sponsor" : "sponsors"}`;
+  }
+
+  const sponsor = child.sponsor;
 
   if (!sponsor) return "No sponsor yet";
 
@@ -189,16 +200,6 @@ function getSponsorLabel(child: SponsorshipProfile) {
   }
 
   return "Sponsor assigned";
-}
-
-function getSponsorProfile(child: SponsorshipProfile) {
-  const sponsor = (child as any).sponsor;
-
-  if (!sponsor || typeof sponsor !== "object") {
-    return null;
-  }
-
-  return sponsor.sponsor || sponsor;
 }
 
 const childExportHeaders = [
@@ -241,10 +242,8 @@ type ChildExportRow = Record<
 >;
 
 function getChildExportRow(child: SponsorshipProfile): ChildExportRow {
-  const rawSponsor = (child as any).sponsor;
-  const sponsor = getSponsorProfile(child) as any;
-  const sponsorshipRecord =
-    rawSponsor && typeof rawSponsor === "object" ? rawSponsor : null;
+  const sponsorships = child.sponsorships || [];
+  const sponsors = sponsorships.map((record) => record.donor);
   const needs = Array.isArray(child.needs)
     ? child.needs.filter(Boolean).join(", ")
     : child.needs || "";
@@ -274,17 +273,17 @@ function getChildExportRow(child: SponsorshipProfile): ChildExportRow {
     "Monthly Need": child.monthlyNeed || "",
     Progress: child.progress ?? "",
     "Sponsorship Status": child.sponsorshipStatus || "",
-    "Sponsor ID": sponsor?.sponsorId || sponsor?._id || "",
-    "Sponsor Name": sponsor?.fullName || sponsor?.name || "",
-    "Sponsor Email": sponsor?.email || "",
-    "Sponsor Phone": sponsor?.phone || "",
-    "Sponsorship Start Date": sponsorshipRecord?.startDate || "",
-    "Sponsorship Period": sponsorshipRecord?.donation?.period || "",
-    "Sponsorship Amount": sponsorshipRecord?.donation?.amount ?? "",
-    "Sponsorship Record ID":
-      sponsorshipRecord?.sponsor && sponsorshipRecord?._id
-        ? sponsorshipRecord._id
-        : "",
+    "Sponsor ID": sponsors.map((item) => item._id || "").filter(Boolean).join("; "),
+    "Sponsor Name": sponsors
+      .map((item) => item.profile?.fullName || item.sponsor?.name || item.name || "")
+      .filter(Boolean)
+      .join("; "),
+    "Sponsor Email": sponsors.map((item) => item.profile?.email || item.email || "").filter(Boolean).join("; "),
+    "Sponsor Phone": sponsors.map((item) => item.profile?.phone || item.phone || "").filter(Boolean).join("; "),
+    "Sponsorship Start Date": sponsorships.map((item) => item.startDate || "").filter(Boolean).join("; "),
+    "Sponsorship Period": sponsorships.map((item) => item.frequency || "").filter(Boolean).join("; "),
+    "Sponsorship Amount": sponsorships.map((item) => item.amount ?? "").filter((item) => item !== "").join("; "),
+    "Sponsorship Record ID": sponsorships.map((item) => item._id || "").filter(Boolean).join("; "),
   };
 }
 
@@ -371,7 +370,7 @@ export default function ChildrenDashboard() {
     },
   });
 
-  const { data: sponsorRecords, isLoading: isLoadingSponsors } = useQuery({
+  const { data: sponsorRecords, isLoading: isLoadingSponsors } = useQuery<SponsorRecord[]>({
     queryKey: ["sponsors", "profiles", "all", page],
     queryFn: async () => {
       const response = await apiRequest("GET", `/sponsors/profiles/all?page=${page}&limit=${PAGE_SIZE}`);
@@ -408,7 +407,7 @@ export default function ChildrenDashboard() {
     useState<SponsorshipProfile | null>(null);
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [assigningSponsor, setAssigningSponsor] = useState(false);
-  const [sponsorshipHistory, setSponsorshipHistory] = useState<any[]>([]);
+  const [sponsorshipHistory, setSponsorshipHistory] = useState<SponsorshipRecord[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState<
     "overview" | "education" | "family" | "sponsor" | "history" | "documents"
@@ -442,8 +441,7 @@ export default function ChildrenDashboard() {
 
     const seen = new Set<string>();
 
-    return sponsorRecords
-      .map((record: any) => {
+    return sponsorRecords.flatMap((record) => {
         // /sponsors/profiles/all returns sponsor documents; older responses
         // may still be nested under donor.sponsor.
         const sponsor =
@@ -456,14 +454,11 @@ export default function ChildrenDashboard() {
         };
         const key = `${option.email}-${option.phone}-${option.name}`;
 
-        if (!option._id || !option.name || !option.email || seen.has(key)) {
-          return null;
-        }
+        if (!option._id || !option.name || !option.email || seen.has(key)) return [];
 
         seen.add(key);
-        return option;
-      })
-      .filter(Boolean);
+        return [option];
+      });
   }, [sponsorRecords]);
 
   const resetForm = () => {
@@ -962,12 +957,10 @@ export default function ChildrenDashboard() {
 
       const res = await apiRequest("PATCH", "/sponsors/reassign", payload);
       if (!res.ok) throw new Error("Failed to assign sponsor");
-      const data = await res.json();
 
       const updatedChild = {
         ...assigningChild,
         sponsorshipStatus: "Sponsored",
-        sponsor: data.sponsor || assigningChild.sponsor,
       };
 
       setChildren((current) =>
@@ -1163,7 +1156,6 @@ export default function ChildrenDashboard() {
           .filter(Boolean),
         monthlyNeed: formState.monthlyNeed,
         education: nextEducation,
-        sponsorshipStatus: formState.sponsorshipStatus,
       };
       if (editingChild) {
         payload._id = editingChild._id;
@@ -1223,7 +1215,6 @@ export default function ChildrenDashboard() {
           .split(",")
           .map((item: any) => item.trim())
           .filter(Boolean),
-        sponsor: data.profile.sponsor || null,
       };
 
       setChildren((current) => {
@@ -1703,20 +1694,15 @@ export default function ChildrenDashboard() {
 
             <div className="space-y-2">
               <Label htmlFor="sponsorshipStatus">Sponsorship status</Label>
-              <Select
+              <Input
+                className="bg-muted text-muted-foreground"
+                id="sponsorshipStatus"
+                readOnly
                 value={formState.sponsorshipStatus}
-                onValueChange={(value) =>
-                  setFormState({ ...formState, sponsorshipStatus: value })
-                }
-              >
-                <SelectTrigger className="bg-background" id="sponsorshipStatus">
-                  <SelectValue>{formState.sponsorshipStatus}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Available">Available</SelectItem>
-                  <SelectItem value="Sponsored">Sponsored</SelectItem>
-                </SelectContent>
-              </Select>
+              />
+              <p className="text-xs text-muted-foreground">
+                Calculated from current sponsorship relationships.
+              </p>
             </div>
 
             <div className="space-y-4 md:col-span-2">
@@ -2547,21 +2533,11 @@ export default function ChildrenDashboard() {
                       </DropdownMenuItem>
 
                       <DropdownMenuItem
-                        onClick={() =>
-                          !child.sponsor &&
-                          child.sponsorshipStatus !== "Sponsored" &&
-                          openAssignSponsor(child)
-                        }
-                        disabled={
-                          Boolean(child.sponsor) ||
-                          child.sponsorshipStatus === "Sponsored"
-                        }
+                        onClick={() => openAssignSponsor(child)}
                         className="cursor-pointer"
                       >
                         <Plus size={14} className="mr-2" />
-                        {child.sponsor || child.sponsorshipStatus === "Sponsored"
-                          ? "Already sponsored"
-                          : "Assign sponsor"}
+                        Assign another sponsor
                       </DropdownMenuItem>
 
                       <DropdownMenuItem
@@ -3131,94 +3107,43 @@ export default function ChildrenDashboard() {
                     Sponsorship details
                   </h3>
 
-                  {getSponsorProfile(viewingChild) ? (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-lg bg-muted p-4">
-                        <p className="text-xs uppercase tracking-wide text-foreground/60">
-                          Sponsor
-                        </p>
-                        <div className="mt-3 flex items-center gap-3">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                            {getSponsorProfile(viewingChild)
-                              ?.name?.charAt(0)
-                              ?.toUpperCase() || "S"}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-foreground">
-                              {getSponsorProfile(viewingChild)?.name}
-                            </p>
-                            <p className="text-sm text-foreground/70">
-                              {getSponsorProfile(viewingChild)?.email}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg bg-muted p-4">
-                        <p className="text-xs uppercase tracking-wide text-foreground/60">
-                          Contact
-                        </p>
-                        <ul className="mt-3 space-y-2 text-sm text-foreground/80">
-                          <li>
-                            <span className="font-medium text-foreground">
-                              Phone:
-                            </span>{" "}
-                            {getSponsorProfile(viewingChild)?.phone ||
-                              "Not provided"}
-                          </li>
-                          <li>
-                            <span className="font-medium text-foreground">
-                              Address:
-                            </span>{" "}
-                            {(viewingChild as any).sponsor?.location &&
-                            typeof (viewingChild as any).sponsor.location ===
-                              "object"
-                              ? [
-                                  (viewingChild as any).sponsor.location
-                                    .address,
-                                  (viewingChild as any).sponsor.location.city,
-                                  (viewingChild as any).sponsor.location.state,
-                                  (viewingChild as any).sponsor.location
-                                    .zipCode,
-                                ]
-                                  .filter(Boolean)
-                                  .join(", ") || "Not provided"
-                              : "Not provided"}
-                          </li>
-                        </ul>
-                      </div>
-
-                      <div className="rounded-lg bg-muted p-4">
-                        <p className="text-xs uppercase tracking-wide text-foreground/60">
-                          Assigned on
-                        </p>
-                        <p className="mt-3 text-base font-semibold text-foreground">
-                          {formatDisplayDate(
-                            (viewingChild as any).sponsor?.startDate,
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="rounded-lg bg-muted p-4">
-                        <p className="text-xs uppercase tracking-wide text-foreground/60">
-                          Sponsorship plan
-                        </p>
-                        <p className="mt-3 text-base font-semibold text-foreground">
-                          {(viewingChild as any).sponsor?.donation?.period ||
-                            "Monthly"}
-                        </p>
-                        <p className="text-sm text-foreground/70">
-                          $
-                          {(
-                            (viewingChild as any).sponsor?.donation?.amount || 0
-                          ).toString()}{" "}
-                          per period
-                        </p>
-                      </div>
+                  {sponsorshipHistory.filter((record) =>
+                    ["Active", "Pending"].includes(record.status),
+                  ).length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {sponsorshipHistory
+                        .filter((record) =>
+                          ["Active", "Pending"].includes(record.status),
+                        )
+                        .map((record) => {
+                          const donor = record.donor || {};
+                          const sponsorName =
+                            donor.profile?.fullName ||
+                            donor.sponsor?.name ||
+                            donor.name ||
+                            "Unknown sponsor";
+                          return (
+                            <div
+                              key={record._id}
+                              className="rounded-lg bg-muted p-4"
+                            >
+                              <p className="font-semibold text-foreground">
+                                {sponsorName}
+                              </p>
+                              <p className="text-sm text-foreground/70">
+                                {donor.profile?.email || ""}
+                              </p>
+                              <p className="mt-3 text-sm text-foreground/80">
+                                {record.status} · ${Number(record.amount || 0)}{" "}
+                                {record.frequency || "Monthly"}
+                              </p>
+                            </div>
+                          );
+                        })}
                     </div>
                   ) : (
                     <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-foreground/70">
-                      No sponsor has been assigned to this child yet.
+                      No current sponsors are linked to this child.
                     </div>
                   )}
                 </div>
@@ -3237,7 +3162,7 @@ export default function ChildrenDashboard() {
                     </div>
                   ) : sponsorshipHistory.length > 0 ? (
                     <div className="space-y-3">
-                      {sponsorshipHistory.map((record: any, index: number) => {
+                      {sponsorshipHistory.map((record, index) => {
                         const donor = record.donor || {};
                         const sponsorName =
                           donor.profile?.fullName ||

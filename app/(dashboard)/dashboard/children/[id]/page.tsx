@@ -38,7 +38,11 @@ import { uploadImageToCloudinary } from "@/lib/cloudinary-upload";
 import { toast } from "@/hooks/use-toast";
 import { ServerError } from "@/components/ui/server-error";
 import { jsPDF } from "jspdf";
-import type { SponsorshipProfile } from "@/lib/types";
+import type {
+  SponsorRecord,
+  SponsorshipProfile,
+  SponsorshipRecord,
+} from "@/lib/types";
 import {
   calculateAgeFromDateOfBirth,
   toDateInputValue,
@@ -53,6 +57,13 @@ import {
   Upload,
   X,
 } from "lucide-react";
+
+interface SponsorOption {
+  _id: string;
+  name: string;
+  email: string;
+  phone: string;
+}
 
 function formatDisplayDate(value?: string | Date | null) {
   if (!value) return "Not provided";
@@ -128,7 +139,7 @@ export default function ChildDetailPage() {
   const [activeTab, setActiveTab] = useState<
     "overview" | "education" | "family" | "sponsor" | "history" | "documents"
   >("overview");
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<SponsorshipRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -138,7 +149,8 @@ export default function ChildDetailPage() {
   const [isUnlinkDialogOpen, setIsUnlinkDialogOpen] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState("");
-  const [sponsorOptions, setSponsorOptions] = useState<any[]>([]);
+  const [unlinkSponsorshipId, setUnlinkSponsorshipId] = useState("");
+  const [sponsorOptions, setSponsorOptions] = useState<SponsorOption[]>([]);
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [selectedSponsorId, setSelectedSponsorId] = useState("");
   const [sponsorshipStartDate, setSponsorshipStartDate] = useState(
@@ -239,10 +251,10 @@ export default function ChildDetailPage() {
       try {
         const response = await apiRequest("GET", "/sponsors/profiles/all");
         if (!response.ok) throw new Error("Unable to load sponsors.");
-        const records = await response.json();
+        const records: SponsorRecord[] = await response.json();
         const seen = new Set<string>();
         const options = (Array.isArray(records) ? records : [])
-          .map((record: any) => {
+          .map((record) => {
             const sponsor =
               record?.profile || record?.sponsor || record?.donor?.sponsor || {};
             return {
@@ -252,7 +264,7 @@ export default function ChildDetailPage() {
               phone: sponsor.phone || "",
             };
           })
-          .filter((option: any) => {
+          .filter((option) => {
             const key = `${option.email}-${option.phone}-${option.name}`;
             if (!option._id || seen.has(key)) return false;
             seen.add(key);
@@ -365,7 +377,6 @@ export default function ChildDetailPage() {
           schoolName: formState.education.schoolName || formState.school.trim(),
         },
         reportCards: profile.reportCards || [],
-        sponsorshipStatus: formState.sponsorshipStatus,
       };
 
       const res = await apiRequest(
@@ -580,7 +591,7 @@ export default function ChildDetailPage() {
   );
 
   const handleUnlinkSponsor = async () => {
-    if (!childId) return;
+    if (!childId || !unlinkSponsorshipId) return;
 
     setIsUnlinking(true);
     setUnlinkError("");
@@ -590,6 +601,7 @@ export default function ChildDetailPage() {
       const response = await apiRequest(
         "PATCH",
         `/sponsors/child/${childId}/unlink`,
+        { sponsorshipId: unlinkSponsorshipId },
       );
       if (!response.ok) throw new Error("Unable to unlink this sponsor.");
       const data = await response.json();
@@ -599,8 +611,6 @@ export default function ChildDetailPage() {
           ? {
               ...current,
               ...data.child,
-              sponsor: null,
-              sponsorshipStatus: "Available",
             }
           : current,
       );
@@ -609,13 +619,14 @@ export default function ChildDetailPage() {
       });
       setHistory((current) =>
         current.map((record) =>
-          ["Active", "Pending"].includes(record.status)
+          record._id === unlinkSponsorshipId
             ? { ...record, status: "Cancelled" }
             : record,
         ),
       );
+      setUnlinkSponsorshipId("");
       setIsUnlinkDialogOpen(false);
-      toast({ title: "Sponsor unlinked", description: "The sponsor was unlinked from this child." });
+      toast({ title: "Sponsorship cancelled", description: "This sponsor-child relationship was cancelled." });
     } catch (error) {
       console.error("Error unlinking sponsor:", error);
       setUnlinkError("Unable to unlink this sponsor. Please try again.");
@@ -662,17 +673,21 @@ export default function ChildDetailPage() {
         status: "Active",
       });
       if (!response.ok) throw new Error("Failed to link sponsor.");
-      const data = await response.json();
 
       setProfile((current) =>
         current
           ? {
               ...current,
               sponsorshipStatus: "Sponsored",
-              sponsor: data.sponsor || selectedSponsor,
             }
           : current,
       );
+      const historyResponse = await apiRequest(
+        "GET",
+        `/sponsors/child/${profile._id}`,
+      );
+      const sponsorshipHistory = await historyResponse.json();
+      setHistory(Array.isArray(sponsorshipHistory) ? sponsorshipHistory : []);
       await queryClient.invalidateQueries({ queryKey: ["children", "profiles"] });
       await queryClient.invalidateQueries({ queryKey: ["sponsors", "profiles", "all"] });
       setIsLinkDialogOpen(false);
@@ -687,7 +702,10 @@ export default function ChildDetailPage() {
     }
   };
 
-  const sponsorProfile = (profile as any)?.sponsor || null;
+  const activeSponsorships = history.filter((record) =>
+    ["Active", "Pending"].includes(record.status),
+  );
+  const sponsorProfile = activeSponsorships[0]?.donor || null;
   const education = profile?.education || {};
   const reportCards = profile?.reportCards || [];
   const needsList = Array.isArray(profile?.needs)
@@ -1391,7 +1409,9 @@ export default function ChildDetailPage() {
                 Sponsor
               </p>
               <p className="mt-1 text-base font-semibold text-foreground">
-                {sponsorProfile?.profile?.fullName || "No sponsor yet"}
+                {activeSponsorships.length > 0
+                  ? `${activeSponsorships.length} current ${activeSponsorships.length === 1 ? "sponsor" : "sponsors"}`
+                  : "No current sponsors"}
               </p>
             </div>
           </div>
@@ -1643,118 +1663,62 @@ export default function ChildDetailPage() {
             <h3 className="mb-3 text-lg font-semibold text-foreground">
               Sponsorship details
             </h3>
-            {sponsorProfile ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                  <div className="min-w-0 rounded-lg bg-muted p-4">
-                  <p className="text-xs uppercase tracking-wide text-foreground/60">
-                    Sponsor
-                  </p>
-                    <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                      {sponsorProfile?.profile?.fullName
-                        ?.charAt(0)
-                        ?.toUpperCase() || "S"}
-                    </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="break-words font-semibold text-foreground">
-                        {sponsorProfile?.profile?.fullName}
-                      </p>
-                        <p className="break-all text-sm text-foreground/70">
-                        {sponsorProfile?.profile?.email}
-                      </p>
-                    </div>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                        className="w-full shrink-0 sm:mt-0 sm:w-auto"
-                      onClick={() => {
-                        setUnlinkError("");
-                        setIsUnlinkDialogOpen(true);
-                      }}
+            {activeSponsorships.length > 0 ? (
+              <div className="mb-4 grid gap-3 md:grid-cols-2">
+                {activeSponsorships.map((record: any) => {
+                  const donor = record.donor || {};
+                  const name =
+                    donor.profile?.fullName ||
+                    donor.sponsor?.name ||
+                    donor.name ||
+                    "Unknown sponsor";
+                  return (
+                    <div
+                      key={record._id}
+                      className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-muted p-4"
                     >
-                      <Unlink className="mr-2 size-4" />
-                      Unlink sponsor
-                    </Button>
-                  </div>
-                </div>
-                <div className="rounded-lg bg-muted p-4">
-                  <p className="text-xs uppercase tracking-wide text-foreground/60">
-                    Contact
-                  </p>
-                  <ul className="mt-3 space-y-2 text-sm text-foreground/80">
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Phone:
-                      </span>{" "}
-                      {sponsorProfile?.profile?.phone || "Not provided"}
-                    </li>
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Address:
-                      </span>{" "}
-                      {[
-                        (sponsorProfile as any)?.profile?.address,
-                        (sponsorProfile as any)?.profile?.city,
-                        (sponsorProfile as any)?.profile?.state,
-                      ]
-                        .filter(Boolean)
-                        .join(", ") || "Not provided"}
-                    </li>
-                    <li>
-                      <span className="font-medium text-foreground">Zip:</span>{" "}
-                      {sponsorProfile?.profile?.zipCode || "Not provided"}
-                    </li>
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Country:
-                      </span>{" "}
-                      {sponsorProfile?.profile?.country || "Not provided"}
-                    </li>
-                  </ul>
-                </div>
-                <div className="rounded-lg bg-muted p-4">
-                  <p className="text-xs uppercase tracking-wide text-foreground/60">
-                    Created on
-                  </p>
-                  <p className="mt-3 text-base font-semibold text-foreground">
-                    {formatDisplayDate(sponsorProfile.createdAt)}
-                  </p>
-                </div>
-                <div className="rounded-lg bg-muted p-4">
-                  <p className="text-xs uppercase tracking-wide text-foreground/60">
-                    Plan
-                  </p>
-                  <p className="mt-3 text-base font-semibold text-foreground">
-                    {(profile as any).sponsor?.donation?.period || "Monthly"}
-                  </p>
-                  <p className="text-sm text-foreground/70">
-                    $
-                    {(
-                      (profile as any).sponsor?.donation?.amount || 0
-                    ).toString()}{" "}
-                    per period
-                  </p>
-                </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">
+                          {name}
+                        </p>
+                        <p className="text-sm text-foreground/70">
+                          {record.status} · ${Number(record.amount || 0)}{" "}
+                          {record.frequency || "Monthly"}
+                        </p>
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          setUnlinkError("");
+                          setUnlinkSponsorshipId(record._id);
+                          setIsUnlinkDialogOpen(true);
+                        }}
+                      >
+                        <Unlink className="mr-2 size-4" />
+                        Cancel
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <div className="flex flex-col gap-4 rounded-lg border border-dashed border-border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-foreground/70">
-                  No sponsor has been assigned to this child yet.
-                </p>
-                <Button
-                  onClick={() => {
-                    setLinkSponsorError("");
-                    setSelectedSponsorId("");
-                    setSponsorshipStartDate(new Date().toISOString().slice(0, 10));
-                    setIsLinkDialogOpen(true);
-                  }}
-                  disabled={sponsorOptions.length === 0}
-                >
-                  <Link2 className="size-4" />
-                  Link sponsor
-                </Button>
-              </div>
+              <p className="mb-4 rounded-lg border border-dashed border-border bg-background p-4 text-sm text-foreground/70">
+                No current sponsors are linked to this child.
+              </p>
             )}
+            <Button
+              onClick={() => {
+                setLinkSponsorError("");
+                setSelectedSponsorId("");
+                setSponsorshipStartDate(new Date().toISOString().slice(0, 10));
+                setIsLinkDialogOpen(true);
+              }}
+              disabled={sponsorOptions.length === 0}
+            >
+              <Link2 className="size-4" />
+              Link another sponsor
+            </Button>
           </div>
         )}
 
@@ -1827,9 +1791,8 @@ export default function ChildDetailPage() {
                 Unlink sponsor from this child?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                The current sponsorship will be cancelled, the child will become
-                available, and all sponsorship and payment history will be
-                preserved.
+                This sponsorship will be cancelled and its history preserved.
+                Any other active sponsors for this child will remain linked.
               </AlertDialogDescription>
               {unlinkError ? (
                 <p className="text-sm text-destructive">{unlinkError}</p>
@@ -2440,14 +2403,12 @@ export default function ChildDetailPage() {
                   <Input
                     className="bg-background text-muted-foreground"
                     id="sponsorshipStatus"
+                    readOnly
                     value={formState.sponsorshipStatus}
-                    onChange={(event) =>
-                      setFormState({
-                        ...formState,
-                        sponsorshipStatus: event.target.value,
-                      })
-                    }
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Calculated from current sponsorship relationships.
+                  </p>
                 </div>
               </div>
             </div>

@@ -13,20 +13,49 @@ export interface PaymentRecord {
   paymentGroupId?: string;
 }
 
+export interface SponsorProfileData {
+  fullName?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+}
+
+export interface SponsorRecord {
+  _id?: string;
+  donor?: SponsorRecord;
+  profile?: SponsorProfileData;
+  sponsor?: SponsorProfileData;
+  donation?: {
+    amount?: number;
+    period?: string;
+  };
+  name?: string;
+  email?: string;
+  phone?: string;
+}
+
 export interface SponsorshipRecord {
-  [key: string]: any;
   _id: string;
-  child?: any;
-  donor: any;
+  child?: SponsorshipProfile | string | null;
+  donor: SponsorRecord;
   plan?: string;
   monthlyAmount?: number;
   amount?: number;
+  donation?: {
+    amount?: number;
+    period?: string;
+  };
+  currency?: string;
   frequency?: string;
   status: "Active" | "Pending" | "Paused" | "Completed" | "Cancelled";
   startDate: string;
+  endDate?: string | null;
   lastPayment?: string;
   totalPaid: number;
   payments: PaymentRecord[];
+  publicPledgeReference?: string;
+  expectedFundsDate?: string;
+  createdAt?: string;
   achInstructionEmail?: {
     status: "pending" | "sending" | "sent" | "failed";
     attempts: number;
@@ -93,5 +122,7 @@ export interface SponsorshipProfile {
   }>;
   progress?: number;
   sponsorshipStatus?: string;
+  sponsorCount?: number;
+  sponsorships?: SponsorshipRecord[];
   sponsor?: any;
 }

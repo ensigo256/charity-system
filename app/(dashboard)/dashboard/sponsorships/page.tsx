@@ -49,6 +49,7 @@ import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
 import { uploadImageToCloudinary } from "@/lib/cloudinary-upload";
 import { ListPagination } from "@/components/dashboard/list-pagination";
+import { SponsorVerificationQueue } from "@/components/sponsor-verification-queue";
 
 const PAGE_SIZE = 25;
 
@@ -979,6 +980,8 @@ export default function SponsorshipsDashboard() {
         </div>
       </div>
 
+      <SponsorVerificationQueue canManage={can("sponsorships.manage")} />
+
       <div className="mb-8 grid gap-4 sm:gap-6 lg:grid-cols-3">
         {isLoading ? (
           <>
@@ -1085,7 +1088,10 @@ export default function SponsorshipsDashboard() {
             {pendingStripeAttempts.map((attempt) => {
               const sponsorship = attempt.sponsorship;
               const donor = sponsorship?.donor;
-              const child = sponsorship?.child;
+              const child =
+                typeof sponsorship?.child === "object" && sponsorship.child
+                  ? sponsorship.child
+                  : null;
               const childName = [child?.givenName || child?.firstName, child?.secondName]
                 .filter(Boolean)
                 .join(" ") || "Child";
@@ -1246,7 +1252,10 @@ export default function SponsorshipsDashboard() {
           <div className="space-y-3">
             {pendingPublicPledges.map((pledge) => {
               const donor = pledge.donor || {};
-              const child = pledge.child || {};
+              const child =
+                typeof pledge.child === "object" && pledge.child
+                  ? pledge.child
+                  : null;
               const isReviewing = activePledgeId === pledge._id;
               const emailStatus = pledge.achInstructionEmail?.status || "unknown";
               const totalPaid = Number(pledge.totalPaid || 0);
@@ -1261,7 +1270,7 @@ export default function SponsorshipsDashboard() {
                     <div className="space-y-1">
                       <p className="font-semibold text-foreground">
                         {donor.profile?.fullName || donor.sponsor?.name || "Sponsor"}
-                        {child.firstName ? ` / ${child.firstName} ${child.secondName || ""}` : " / Child"}
+                        {child?.firstName ? ` / ${child.firstName} ${child.secondName || ""}` : " / Child"}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {donor.profile?.email || "No email"} · ${pledge.amount} {pledge.currency || "USD"} / {pledge.frequency || "Monthly"}
@@ -1410,9 +1419,12 @@ export default function SponsorshipsDashboard() {
           <div className="space-y-3">
             {pendingStripePledges.map((pledge) => {
               const donor = pledge.donor || {};
-              const child = pledge.child || {};
+              const child =
+                typeof pledge.child === "object" && pledge.child
+                  ? pledge.child
+                  : null;
               const isReviewing = activeStripePledgeId === pledge._id;
-              const childName = [child.firstName, child.secondName].filter(Boolean).join(" ") || "Child";
+              const childName = [child?.firstName, child?.secondName].filter(Boolean).join(" ") || "Child";
               return (
                 <div key={pledge._id} className="rounded-lg border border-border bg-background p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -2340,7 +2352,10 @@ export default function SponsorshipsDashboard() {
                         Child
                       </p>
                       <h2 className="text-xl font-semibold text-foreground">
-                        {selectedRecord.child?.firstName}
+                        {typeof selectedRecord.child === "object" &&
+                        selectedRecord.child
+                          ? selectedRecord.child.firstName
+                          : "Child"}
                       </h2>
                       <p className="text-sm text-foreground/70">
                         {selectedRecord.plan}

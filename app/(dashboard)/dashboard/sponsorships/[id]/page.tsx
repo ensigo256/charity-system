@@ -193,6 +193,7 @@ export default function SponsorDetailPage() {
   const [unlinkTarget, setUnlinkTarget] = useState<{
     childId: string;
     childName: string;
+    sponsorshipId: string;
   } | null>(null);
   const [isUnlinking, setIsUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState("");
@@ -870,7 +871,7 @@ export default function SponsorDetailPage() {
   };
 
   const handleUnlinkChild = async () => {
-    if (!unlinkTarget?.childId) return;
+    if (!unlinkTarget?.childId || !unlinkTarget.sponsorshipId) return;
 
     setIsUnlinking(true);
     setUnlinkError("");
@@ -879,6 +880,7 @@ export default function SponsorDetailPage() {
       await apiRequest(
         "PATCH",
         `/sponsors/child/${unlinkTarget.childId}/unlink`,
+        { sponsorshipId: unlinkTarget.sponsorshipId },
       );
       setProfile((current) =>
         current
@@ -886,7 +888,7 @@ export default function SponsorDetailPage() {
               ...current,
               children: current.children?.filter(
                 (entry: any) =>
-                  (entry.child?._id || entry.childId) !== unlinkTarget.childId,
+                  entry._id !== unlinkTarget.sponsorshipId,
               ),
             }
           : current,
@@ -1496,7 +1498,11 @@ export default function SponsorDetailPage() {
                             onClick={(event) => {
                               event.stopPropagation();
                               setUnlinkError("");
-                              setUnlinkTarget({ childId, childName });
+                              setUnlinkTarget({
+                                childId,
+                                childName,
+                                sponsorshipId: String(entry._id),
+                              });
                             }}
                           >
                             <Unlink className="mr-1 size-4" />
@@ -2203,9 +2209,8 @@ export default function SponsorDetailPage() {
               Unlink {unlinkTarget?.childName}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will cancel the child&apos;s active sponsorship and make the
-              child available again. Sponsorship and payment history will be
-              preserved.
+              This cancels only this sponsor-child relationship. Other sponsors
+              and sponsorships for the child will remain unchanged.
             </AlertDialogDescription>
             {unlinkError ? (
               <p className="text-sm text-destructive">{unlinkError}</p>
