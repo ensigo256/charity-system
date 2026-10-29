@@ -174,6 +174,7 @@ export default function BlogsPage() {
       image: { url: "", public_id: "" },
     }));
     setImagePreview(null);
+    setSelectedImage(null);
   };
 
   const categories = [
@@ -356,7 +357,7 @@ export default function BlogsPage() {
         excerpt: newBlogForm.excerpt,
         content: newBlogForm.content,
         videoId: newBlogForm.videoId,
-        imageUrl: newBlogForm.imageUrl,
+        imageUrl: imageData?.secure_url || newBlogForm.imageUrl,
         image: imageData
           ? { url: imageData.secure_url, public_id: imageData.public_id }
           : newBlogForm.imageUrl.trim()
@@ -653,6 +654,7 @@ export default function BlogsPage() {
                   URL.revokeObjectURL(imagePreview);
                 }
                 setSelectedImage(file);
+                setNewBlogForm((prev) => ({ ...prev, imageUrl: "" }));
                 setImagePreview(URL.createObjectURL(file));
               }}
             >
@@ -691,6 +693,7 @@ export default function BlogsPage() {
                   }
                   setImagePreview(URL.createObjectURL(file));
                   setSelectedImage(file);
+                  setNewBlogForm((prev) => ({ ...prev, imageUrl: "" }));
                 }}
               />
             </div>
