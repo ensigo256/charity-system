@@ -39,6 +39,28 @@ import { ListPagination } from "@/components/dashboard/list-pagination";
 
 const PAGE_SIZE = 25;
 
+function normalizeGalleryImages(payload: unknown): GalleryImage[] {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+
+  const data = payload as Record<string, unknown>;
+  const candidates = [data.gallery, data.galleryItems, data.images, data.items, data.data];
+  const list = candidates.find(Array.isArray);
+  return Array.isArray(list) ? (list as GalleryImage[]) : [];
+}
+
+function normalizeCreatedGalleryImage(payload: unknown): GalleryImage | null {
+  if (!payload || typeof payload !== "object") return null;
+  if (Array.isArray(payload)) return null;
+
+  const data = payload as Record<string, unknown>;
+  const candidate = (data.newGalleryItem || data.galleryItem || data.image || data.gallery || payload) as unknown;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+
+  const image = candidate as Partial<GalleryImage>;
+  return typeof image._id === "string" ? (image as GalleryImage) : null;
+}
+
 interface GalleryImage {
   _id: string;
   title: string;
@@ -78,8 +100,11 @@ export default function GalleryPage() {
   const { data: galleryData, refetch } = useQuery<GalleryImage[]>({
     queryKey: ["gallery", "all", page],
     queryFn: async () => {
-      const response = await apiRequest("GET", `/gallery/all?page=${page}&limit=${PAGE_SIZE}`);
-      return response.json();
+      const response = await apiRequest(
+        "GET",
+        `/gallery/all?page=${page}&limit=${PAGE_SIZE}`,
+      );
+      return normalizeGalleryImages(await response.json());
     },
   });
 
@@ -177,12 +202,21 @@ export default function GalleryPage() {
 
   const categories = [
     "All",
-    ...Array.from(new Set(images.map((img) => img.category))),
+    ...Array.from(
+      new Set(
+        images
+          .filter((image): image is GalleryImage => Boolean(image?.category))
+          .map((image) => image.category),
+      ),
+    ),
   ];
 
   const filteredImages = useMemo(() => {
-    return images.filter((image) => {
-      const matchesSearch = image.title
+    return images.filter((image): image is GalleryImage => {
+      if (!image || typeof image !== "object") return false;
+      if (!image.category) return false;
+
+      const matchesSearch = (image.title || "")
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
       const matchesCategory =
@@ -214,13 +248,20 @@ export default function GalleryPage() {
             image._id === id ? { ...image, ...editData } : image,
           ),
         );
-        toast({ title: "Image updated", description: "The gallery image was updated successfully." });
+        toast({
+          title: "Image updated",
+          description: "The gallery image was updated successfully.",
+        });
       } else {
         throw new Error("Failed to update gallery image");
       }
     } catch (error) {
       console.error("Error updating image:", error);
-      toast({ variant: "destructive", title: "Unable to update image", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to update image",
+        description: "Please try again.",
+      });
     }
     setEditingId(null);
     setEditData({});
@@ -238,10 +279,17 @@ export default function GalleryPage() {
       const response = await apiRequest("DELETE", `/gallery/${id}/delete`);
       if (!response.ok) throw new Error("Failed to delete gallery image");
       setImages(images.filter((image) => image._id !== id));
-      toast({ title: "Image deleted", description: "The gallery image was deleted successfully." });
+      toast({
+        title: "Image deleted",
+        description: "The gallery image was deleted successfully.",
+      });
     } catch (error) {
       console.error("Error deleting image:", error);
-      toast({ variant: "destructive", title: "Unable to delete image", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to delete image",
+        description: "Please try again.",
+      });
     } finally {
       setDeletingId(null);
     }
@@ -287,17 +335,31 @@ export default function GalleryPage() {
       const res = await apiRequest("POST", "/gallery/new", newImage);
 
       if (res.ok) {
-        const data = await res.json();
-        setImages([...images, data?.newGalleryItem]);
+        const createdImage = normalizeCreatedGalleryImage(await res.json());
+        if (!createdImage) {
+          await refetch();
+        } else {
+          setImages((currentImages) => [
+            createdImage,
+            ...currentImages.filter((image) => image._id !== createdImage._id),
+          ]);
+        }
       } else {
         throw new Error("Failed to create gallery image");
       }
       resetNewImageForm();
       setShowAddDialog(false);
-      toast({ title: "Image uploaded", description: "The gallery image was added successfully." });
+      toast({
+        title: "Image uploaded",
+        description: "The gallery image was added successfully.",
+      });
     } catch (error) {
       console.error("Error uploading image:", error);
-      toast({ variant: "destructive", title: "Unable to upload image", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to upload image",
+        description: "Please try again.",
+      });
     } finally {
       setSaving(false);
     }

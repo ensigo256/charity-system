@@ -37,7 +37,7 @@ import {
 import { on } from "events";
 import { set } from "react-hook-form";
 import { apiRequest } from "@/lib/query-client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { url } from "inspector";
 import { toast } from "@/hooks/use-toast";
@@ -90,6 +90,7 @@ export default function BlogsPage() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
   const [page, setPage] = useState(1);
+  const queryClient = useQueryClient();
 
   const {
     data: blogData,
@@ -98,7 +99,10 @@ export default function BlogsPage() {
   } = useQuery<any[]>({
     queryKey: ["blogs", "all", page],
     queryFn: async () => {
-      const response = await apiRequest("GET", `/blogs/all?page=${page}&limit=${PAGE_SIZE}`);
+      const response = await apiRequest(
+        "GET",
+        `/blogs/all?page=${page}&limit=${PAGE_SIZE}`,
+      );
       return response.json();
     },
   });
@@ -149,6 +153,7 @@ export default function BlogsPage() {
       URL.revokeObjectURL(imagePreview);
     }
     setImagePreview(null);
+    setEditData({});
   };
 
   const handleDialogOpenChange = (open: boolean) => {
@@ -210,10 +215,17 @@ export default function BlogsPage() {
       const response = await apiRequest("DELETE", `/blogs/delete/${id}`);
       if (!response.ok) throw new Error("Failed to delete blog post");
       setBlogs(blogs.filter((blog) => blog._id !== id));
-      toast({ title: "Blog post deleted", description: "The blog post was deleted successfully." });
+      toast({
+        title: "Blog post deleted",
+        description: "The blog post was deleted successfully.",
+      });
     } catch (error) {
       console.error("Error deleting blog post:", error);
-      toast({ variant: "destructive", title: "Unable to delete blog post", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to delete blog post",
+        description: "Please try again.",
+      });
     } finally {
       setSaving(false);
     }
@@ -241,7 +253,10 @@ export default function BlogsPage() {
             blog._id === id ? { ...blog, featured: !blog.featured } : blog,
           ),
         );
-        toast({ title: "Featured status updated", description: "The blog post's featured status was updated." });
+        toast({
+          title: "Featured status updated",
+          description: "The blog post's featured status was updated.",
+        });
       } else {
         throw new Error("Failed to update featured status");
       }
@@ -249,7 +264,11 @@ export default function BlogsPage() {
       setOpenMenuId(null);
     } catch (error) {
       console.error("Error updating featured status:", error);
-      toast({ variant: "destructive", title: "Unable to update featured status", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to update featured status",
+        description: "Please try again.",
+      });
     }
   };
 
@@ -263,13 +282,20 @@ export default function BlogsPage() {
             blog._id === id ? { ...blog, status: "published" } : blog,
           ),
         );
-        toast({ title: "Blog post published", description: "The blog post was published successfully." });
+        toast({
+          title: "Blog post published",
+          description: "The blog post was published successfully.",
+        });
       } else {
         throw new Error("Failed to publish blog post");
       }
     } catch (error) {
       console.error("Error publishing blog post:", error);
-      toast({ variant: "destructive", title: "Unable to publish blog post", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to publish blog post",
+        description: "Please try again.",
+      });
     } finally {
       setOpenMenuId(null);
     }
@@ -333,11 +359,34 @@ export default function BlogsPage() {
       };
 
       if (editData && editData._id) {
-        const response = await apiRequest("PUT", `/blogs/${editData._id}/update`, payLoad);
+        const response = await apiRequest(
+          "PUT",
+          `/blogs/${editData._id}/update`,
+          payLoad,
+        );
         if (!response.ok) throw new Error("Failed to update blog post");
+
+        await queryClient.invalidateQueries({ queryKey: ["blogs", "all"] });
       } else {
         const response = await apiRequest("POST", "/blogs/new", payLoad);
-        if (!response.ok) throw new Error("Failed to create blog post");
+        const data = await response.json();
+        const createdBlog = data.blog as BlogPost | undefined;
+        if (!createdBlog?._id)
+          throw new Error("The server did not return the created blog");
+
+        setBlogs((currentBlogs) => [
+          createdBlog,
+          ...currentBlogs.filter((blog) => blog._id !== createdBlog._id),
+        ]);
+
+        await queryClient.invalidateQueries({ queryKey: ["blogs", "all"] });
+        queryClient.setQueryData<BlogPost[]>(
+          ["blogs", "all", page],
+          (currentBlogs = []) => [
+            createdBlog,
+            ...currentBlogs.filter((blog) => blog._id !== createdBlog._id),
+          ],
+        );
       }
 
       resetNewBlogForm();
@@ -351,7 +400,11 @@ export default function BlogsPage() {
     } catch (error) {
       setSaving(false);
       console.error("Error uploading image:", error);
-      toast({ variant: "destructive", title: "Unable to save blog post", description: "Please try again." });
+      toast({
+        variant: "destructive",
+        title: "Unable to save blog post",
+        description: "Please try again.",
+      });
     } finally {
       setSaving(false);
     }
