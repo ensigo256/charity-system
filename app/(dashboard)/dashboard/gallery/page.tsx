@@ -44,7 +44,13 @@ function normalizeGalleryImages(payload: unknown): GalleryImage[] {
   if (!payload || typeof payload !== "object") return [];
 
   const data = payload as Record<string, unknown>;
-  const candidates = [data.gallery, data.galleryItems, data.images, data.items, data.data];
+  const candidates = [
+    data.gallery,
+    data.galleryItems,
+    data.images,
+    data.items,
+    data.data,
+  ];
   const list = candidates.find(Array.isArray);
   return Array.isArray(list) ? (list as GalleryImage[]) : [];
 }
@@ -54,8 +60,13 @@ function normalizeCreatedGalleryImage(payload: unknown): GalleryImage | null {
   if (Array.isArray(payload)) return null;
 
   const data = payload as Record<string, unknown>;
-  const candidate = (data.newGalleryItem || data.galleryItem || data.image || data.gallery || payload) as unknown;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const candidate = (data.newGalleryItem ||
+    data.galleryItem ||
+    data.image ||
+    data.gallery ||
+    payload) as unknown;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+    return null;
 
   const image = candidate as Partial<GalleryImage>;
   return typeof image._id === "string" ? (image as GalleryImage) : null;

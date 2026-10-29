@@ -153,6 +153,7 @@ export default function BlogsPage() {
       URL.revokeObjectURL(imagePreview);
     }
     setImagePreview(null);
+    setSelectedImage(null);
     setEditData({});
   };
 
@@ -206,6 +207,7 @@ export default function BlogsPage() {
       category: blog.category,
     });
     setEditData(blog);
+    setSelectedImage(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -341,21 +343,28 @@ export default function BlogsPage() {
       }
       // if (!newBlogForm.title || !newBlogForm.author) return;
 
+      const currentBlog = editData._id
+        ? blogs.find((blog) => blog._id === editData._id)
+        : undefined;
       const payLoad = {
         title: newBlogForm.title,
         author: newBlogForm.author,
         category: newBlogForm.category || "General",
-        status: "draft",
+        status: editData._id
+          ? currentBlog?.status || editData.status || "draft"
+          : "draft",
         excerpt: newBlogForm.excerpt,
         content: newBlogForm.content,
         videoId: newBlogForm.videoId,
         imageUrl: newBlogForm.imageUrl,
         image: imageData
           ? { url: imageData.secure_url, public_id: imageData.public_id }
-          : {
-              url: newBlogForm.image?.url || "",
-              public_id: newBlogForm.image?.public_id || "",
-            },
+          : newBlogForm.imageUrl.trim()
+            ? { url: "", public_id: "" }
+            : {
+                url: newBlogForm.image?.url || "",
+                public_id: newBlogForm.image?.public_id || "",
+              },
       };
 
       if (editData && editData._id) {
@@ -643,7 +652,7 @@ export default function BlogsPage() {
                 if (imagePreview) {
                   URL.revokeObjectURL(imagePreview);
                 }
-                setNewBlogForm((prev) => ({ ...prev, imageFile: file }));
+                setSelectedImage(file);
                 setImagePreview(URL.createObjectURL(file));
               }}
             >
@@ -680,7 +689,6 @@ export default function BlogsPage() {
                   if (imagePreview) {
                     URL.revokeObjectURL(imagePreview);
                   }
-                  setNewBlogForm((prev) => ({ ...prev, imageFile: file }));
                   setImagePreview(URL.createObjectURL(file));
                   setSelectedImage(file);
                 }}
