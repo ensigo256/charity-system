@@ -71,45 +71,20 @@ interface NewsletterSubscriber {
   email: string;
   name: string;
   subscribedDate: string;
-  status: "active" | "unsubscribed";
+  status: "pending" | "active" | "unsubscribed";
 }
 
-const initialNewsletterSubscribers: NewsletterSubscriber[] = [
-  {
-    id: "sub-1",
-    email: "john@example.com",
-    name: "John Smith",
-    subscribedDate: "2024-02-15",
-    status: "active",
-  },
-  {
-    id: "sub-2",
-    email: "alice@example.com",
-    name: "Alice Johnson",
-    subscribedDate: "2024-02-20",
-    status: "active",
-  },
-  {
-    id: "sub-3",
-    email: "bob@example.com",
-    name: "Bob Williams",
-    subscribedDate: "2024-01-30",
-    status: "active",
-  },
-  {
-    id: "sub-4",
-    email: "carol@example.com",
-    name: "Carol Brown",
-    subscribedDate: "2024-03-01",
-    status: "unsubscribed",
-  },
-];
+interface BackendNewsletterSubscriber {
+  _id: string;
+  email: string;
+  name?: string;
+  subscribedOn?: string;
+  status: "pending" | "active" | "unsubscribed";
+}
 
 export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>(
-    initialNewsletterSubscribers,
-  );
+  const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([]);
   const [activeTab, setActiveTab] = useState<
     "staff" | "volunteers" | "subscribers"
   >("staff");
@@ -145,6 +120,33 @@ export default function StaffPage() {
       setStaff(staffData);
     }
   }, [staffData]);
+
+  const { data: subscriberData } = useQuery<BackendNewsletterSubscriber[]>({
+    queryKey: ["newsletter", "subscribers"],
+    queryFn: async () => {
+      const response = await apiRequest(
+        "GET",
+        "/newsletter/subscribers?page=1&limit=100",
+      );
+      return response.json();
+    },
+  });
+
+  useEffect(() => {
+    if (!subscriberData) return;
+
+    setSubscribers(
+      subscriberData.map((subscriber) => ({
+        id: subscriber._id,
+        email: subscriber.email,
+        name: subscriber.name?.trim() || subscriber.email,
+        subscribedDate: subscriber.subscribedOn
+          ? new Date(subscriber.subscribedOn).toLocaleDateString()
+          : "",
+        status: subscriber.status,
+      })),
+    );
+  }, [subscriberData]);
 
   const roleOptions = [
     "Executive Director",
@@ -306,18 +308,6 @@ export default function StaffPage() {
     setStaff(
       staff.map((member) =>
         member._id === id ? { ...member, status: newStatus } : member,
-      ),
-    );
-  };
-
-  const handleDeleteSubscriber = (id: string) => {
-    setSubscribers(subscribers.filter((sub) => sub.id !== id));
-  };
-
-  const handleUnsubscribe = (id: string) => {
-    setSubscribers(
-      subscribers.map((sub) =>
-        sub.id === id ? { ...sub, status: "unsubscribed" } : sub,
       ),
     );
   };
@@ -710,9 +700,6 @@ export default function StaffPage() {
                     <th className="px-6 py-3 text-left text-sm font-semibold text-foreground">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-foreground">
-                      Actions
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -887,25 +874,6 @@ export default function StaffPage() {
                       >
                         {subscriber.status}
                       </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        {subscriber.status === "active" && (
-                          <button
-                            onClick={() => handleUnsubscribe(subscriber.id)}
-                            className="p-2 hover:bg-background rounded transition-colors text-foreground/60 hover:text-red-500"
-                            title="Mark as unsubscribed"
-                          >
-                            <Mail size={16} />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleDeleteSubscriber(subscriber.id)}
-                          className="p-2 hover:bg-background rounded transition-colors text-foreground/60 hover:text-red-500"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
                     </td>
                   </tr>
                 ))}

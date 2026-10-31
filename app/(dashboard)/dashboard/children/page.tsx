@@ -90,9 +90,9 @@ const initialFormState: any = {
   },
   background: "",
   school: "",
-  location: "",
-  needsInput: "",
-  monthlyNeed: "",
+  location: "Kamapala, Uganda",
+  needsInput: "Education, Nutrition, Health",
+  monthlyNeed: "50",
   education: {
     isStudying: false,
     educationStage: "",
